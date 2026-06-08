@@ -2,7 +2,7 @@
 # 自用 sing-box 安装脚本
 # 协议: vmess-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.8 1
+# 最后更新时间: 2026.6.8
 # =========================
 
 export LANG=en_US.UTF-8
@@ -93,6 +93,25 @@ allow_port() {
     done
 }
 
+# ── 防火墙删除旧规则 ──────────────────────────────
+remove_port() {
+    local has_ufw=0 has_iptables=0 has_ip6tables=0
+    command_exists ufw       && has_ufw=1
+    command_exists iptables  && has_iptables=1
+    command_exists ip6tables && has_ip6tables=1
+
+    for rule in "$@"; do
+        local port="${rule%/*}" proto="${rule#*/}"
+        [ $has_ufw -eq 1 ] && ufw delete allow "${port}/${proto}" >/dev/null 2>&1
+        if [ $has_iptables -eq 1 ]; then
+            iptables  -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+        fi
+        if [ $has_ip6tables -eq 1 ]; then
+            ip6tables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+        fi
+    done
+}
+
 # ── 节点名称 ──────────────────────────────────────
 get_flag() {
     local code
@@ -112,16 +131,13 @@ get_flag() {
 get_node_name() { echo "$(get_flag) $(hostname)"; }
 
 # ── Hysteria2 指纹（base64 格式）─────────────────
+# 修复第10条：移除 python3 依赖，改用 xxd + base64
 get_hy2_fingerprint() {
     local hex
     hex=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" 2>/dev/null \
         | cut -d'=' -f2 | tr -d ':')
     [ -z "$hex" ] && { echo ""; return; }
-    echo "$hex" | python3 -c "
-import sys, base64
-h = sys.stdin.read().strip()
-print(base64.b64encode(bytes.fromhex(h)).decode().rstrip('='))
-"
+    echo "$hex" | xxd -r -p | base64 | tr -d '=' | tr -d '\n'
 }
 
 # ── 安装核心 ──────────────────────────────────────
@@ -554,6 +570,10 @@ change_config() {
         2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
+            # 修复第9条：先删除旧端口防火墙规则
+            old_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "$inbounds_file")
+            remove_port "${old_port}/udp"
+            # 写入新配置
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="hysteria2") | .listen_port) = $p' \
                 "$inbounds_file" > "${inbounds_file}.tmp" \
@@ -565,6 +585,10 @@ change_config() {
         3)
             reading "\n请输入新的 VMess-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
+            # 修复第9条：先删除旧端口防火墙规则
+            old_port=$(jq -r '.inbounds[] | select(.type=="vmess") | .listen_port' "$inbounds_file")
+            remove_port "${old_port}/tcp"
+            # 写入新配置
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vmess") | .listen_port) = $p' \
                 "$inbounds_file" > "${inbounds_file}.tmp" \
