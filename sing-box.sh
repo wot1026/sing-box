@@ -598,6 +598,32 @@ change_config() {
     esac
 }
 
+# ── 升级 sing-box ─────────────────────────────────
+upgrade_singbox() {
+    check_singbox &>/dev/null
+    [ $? -eq 2 ] && { yellow "sing-box 尚未安装！"; sleep 1; return; }
+
+    local arch_raw arch
+    arch_raw=$(uname -m)
+    case "$arch_raw" in
+        x86_64|amd64)  arch='amd64' ;;
+        aarch64|arm64) arch='arm64' ;;
+        *) red "不支持的架构: ${arch_raw}"; return 1 ;;
+    esac
+
+    yellow "正在下载最新版 sing-box...\n"
+    curl -fsSLo "${work_dir}/sing-box.tmp" "https://${arch}.ssss.nyc.mn/sbx-1.13.13" \
+        || { red "下载失败"; return 1; }
+
+    stop_singbox
+    mv "${work_dir}/sing-box.tmp" "${work_dir}/sing-box"
+    chmod +x "${work_dir}/sing-box"
+    start_singbox
+    green "\nsing-box 已升级完成\n"
+    "${work_dir}/sing-box" version
+}
+
+
 # ── 配置固定 Argo 隧道 ────────────────────────────
 configure_fixed_tunnel() {
     clear
@@ -790,7 +816,9 @@ menu() {
     echo   "==============="
     green  "8. 更新脚本"
     echo   "==============="
-    purple "9. SSH 综合工具箱"
+    green  "9. 升级 sing-box"
+    echo   "==============="
+    purple "10. SSH 综合工具箱"
     echo   "==============="
     red    "0. 退出脚本"
     echo   "==========="
@@ -862,7 +890,8 @@ case "$1" in
                 6) change_config;      need_pause=true ;;
                 7) cn_block_manage;    need_pause=true ;;
                 8) update_script;      need_pause=false ;;
-                9)
+                9)  upgrade_singbox;   need_pause=true ;;
+                10)
                     clear
                     bash <(curl -Ls ssh_tool.eooce.com)
                     need_pause=false
