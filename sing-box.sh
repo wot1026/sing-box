@@ -572,12 +572,12 @@ change_config() {
             ;;
         4)
             clear
-            green "1: cf.090227.xyz  2: cf.877774.xyz  3: cf.877771.xyz  4: cdns.doon.eu.org\n"
+            green "1: ct.877774.xyz  2: cf.877774.xyz  3: cf.877771.xyz  4: cdns.doon.eu.org\n"
             reading "请输入优选域名或 IP[:端口]（回车默认 cf.877774.xyz）: " input
             local cfip cfport
             case "$input" in
                 ""|"2") cfip="cf.877774.xyz";    cfport="443" ;;
-                "1")    cfip="cf.090227.xyz";    cfport="443" ;;
+                "1")    cfip="ct.877774.xyz";    cfport="443" ;;
                 "3")    cfip="cf.877771.xyz";    cfport="443" ;;
                 "4")    cfip="cdns.doon.eu.org"; cfport="443" ;;
                 *)
