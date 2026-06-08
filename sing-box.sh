@@ -429,26 +429,35 @@ EOF
 
 # 通用服务管理
 manage_service() {
-    local service_name="$1" action="$2"
+    local service_name="$1" action="$2" ret=0
     case "$action" in
         start)
             yellow "正在启动 ${service_name}...\n"
-            if command_exists rc-service; then rc-service "$service_name" start
-            else systemctl start "$service_name"; fi
-            [ $? -eq 0 ] && green "${service_name} 已启动\n" || red "${service_name} 启动失败\n"
+            if command_exists rc-service; then
+                rc-service "$service_name" start; ret=$?
+            else
+                systemctl start "$service_name"; ret=$?
+            fi
+            [ $ret -eq 0 ] && green "${service_name} 已启动\n" || red "${service_name} 启动失败\n"
             ;;
         stop)
             yellow "正在停止 ${service_name}...\n"
-            if command_exists rc-service; then rc-service "$service_name" stop
-            else systemctl stop "$service_name"; fi
-            [ $? -eq 0 ] && green "${service_name} 已停止\n" || red "${service_name} 停止失败\n"
+            if command_exists rc-service; then
+                rc-service "$service_name" stop; ret=$?
+            else
+                systemctl stop "$service_name"; ret=$?
+            fi
+            [ $ret -eq 0 ] && green "${service_name} 已停止\n" || red "${service_name} 停止失败\n"
             ;;
         restart)
             yellow "正在重启 ${service_name}...\n"
-            if command_exists rc-service; then rc-service "$service_name" restart
-            # FIX[P3]: restart 不需要 daemon-reload，只有 service 文件变动后才需要
-            else systemctl restart "$service_name"; fi
-            [ $? -eq 0 ] && green "${service_name} 已重启\n" || red "${service_name} 重启失败\n"
+            if command_exists rc-service; then
+                rc-service "$service_name" restart; ret=$?
+            else
+                # restart 不需要 daemon-reload，只有 service 文件变动后才需要
+                systemctl restart "$service_name"; ret=$?
+            fi
+            [ $ret -eq 0 ] && green "${service_name} 已重启\n" || red "${service_name} 重启失败\n"
             ;;
     esac
 }
@@ -460,9 +469,12 @@ start_argo()     { manage_service "argo" "start"; }
 stop_argo()      { manage_service "argo" "stop"; }
 restart_argo()   { manage_service "argo" "restart"; }
 
-# 获取固定隧道域名
+# 获取固定隧道域名（兼容 busybox grep，不依赖 -P）
 get_fixed_domain() {
-    grep -oP '(?<=hostname: )\S+' "${work_dir}/tunnel.yml" 2>/dev/null | head -1
+    grep 'hostname:' "${work_dir}/tunnel.yml" 2>/dev/null \
+        | head -1 \
+        | sed 's/.*hostname:[[:space:]]*//' \
+        | tr -d '[:space:]'
 }
 
 # 检查固定隧道是否已配置
@@ -470,13 +482,12 @@ is_fixed_tunnel_configured() {
     [ -f "${work_dir}/tunnel.yml" ]
 }
 
-# FIX[P0]: Hysteria2 pinSHA256 应为 base64 格式，原版 %3A 十六进制编码客户端不识别
+# Hysteria2 pinSHA256：base64 编码的 DER 格式 SHA256 指纹
 get_hy2_fingerprint() {
     openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" 2>/dev/null \
         | cut -d'=' -f2 \
         | tr -d ':' \
-        | tr '[:upper:]' '[:lower:]' \
-        | xxd -r -p 2>/dev/null \
+        | xxd -r -p \
         | base64 \
         | tr -d '='
 }
@@ -487,10 +498,13 @@ get_info() {
     server_ip=$(curl -4 -sm 3 ip.sb)
     node_prefix=$(get_node_name)
 
-    # FIX[P1]: 读取持久化的 CF 优选配置，覆盖环境变量默认值
+    # 读取持久化的 CF 优选配置，覆盖环境变量默认值
+    # 用 grep+cut 逐行读取，避免 source 执行 cf.env 中潜在的恶意内容
     if [ -f "${work_dir}/cf.env" ]; then
-        # shellcheck source=/dev/null
-        source "${work_dir}/cf.env"
+        _cfip=$(grep '^CFIP=' "${work_dir}/cf.env" | cut -d'=' -f2-)
+        _cfport=$(grep '^CFPORT=' "${work_dir}/cf.env" | cut -d'=' -f2-)
+        [ -n "$_cfip" ]   && CFIP="$_cfip"
+        [ -n "$_cfport" ] && CFPORT="$_cfport"
     fi
 
     clear
