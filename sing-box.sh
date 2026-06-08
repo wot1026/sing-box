@@ -469,23 +469,19 @@ cn_block_manage() {
             if $block_enabled; then
                 yellow "大陆拦截已开启，无需重复操作\n"; sleep 1; return
             fi
-            
-            # --- 使用 jq 开启规则 ---
             jq '
-  .route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary",
-    "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-    "download_detour":"direct"}] |
-  .route.rules = [
-    {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn",
-      "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com",
-      "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com",
-      "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],
-     "outbound":"direct"},
-    {"rule_set":["geosite-cn"],"outbound":"block"}
-  ] + .route.rules
-' "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
-            # ------------------------
-
+              .route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary",
+                "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+                "download_detour":"direct"}] |
+              .route.rules = [
+                {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn",
+                  "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com",
+                  "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com",
+                  "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],
+                 "outbound":"direct"},
+                {"rule_set":["geosite-cn"],"outbound":"block"}
+              ] + .route.rules
+            ' "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已开启\n"
@@ -494,14 +490,11 @@ cn_block_manage() {
             if ! $block_enabled; then
                 yellow "大陆拦截未开启\n"; sleep 1; return
             fi
-            
-            # --- 使用 jq 关闭规则 ---
-            jq 'del(.route.rules[] | select(.rule_set[]? == "geosite-cn")) |
-                del(.route.rules[] | select(.domain_regex? and .outbound == "direct")) |
-                del(.route.rule_set[] | select(.tag == "geosite-cn"))' \
-                "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
-            # ------------------------
-
+            jq '
+              del(.route.rules[] | select(.rule_set[]? == "geosite-cn")) |
+              del(.route.rules[] | select(.domain_regex? and .outbound == "direct")) |
+              del(.route.rule_set[] | select(.tag == "geosite-cn"))
+            ' "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已关闭\n"
@@ -510,6 +503,7 @@ cn_block_manage() {
         *) red "无效选项" ;;
     esac
 }
+
 
 # ── 修改节点配置 ──────────────────────────────────
 change_config() {
