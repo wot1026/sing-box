@@ -210,7 +210,7 @@ EOF
     cat > "${conf_dir}/dns.json" << 'EOF'
 {
   "dns": {
-    "servers": [{"tag": "local", "type": "local"}],
+    "servers": [{"tag": "local", "address": "local"}],
     "strategy": "ipv4_only"
   }
 }
