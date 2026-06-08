@@ -140,11 +140,6 @@ manage_packages() {
     return 0
 }
 
-# 获取真实 IP（仅 IPv4）
-get_realip() {
-    curl -4 -sm 3 ip.sb
-}
-
 # 获取国旗 emoji
 get_flag() {
     local country_code
@@ -771,7 +766,7 @@ change_config() {
             vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
             encoded="${vmess_url#vmess://}"
             decoded=$(echo "$encoded" | base64 --decode 2>/dev/null)
-            updated=$(echo "$decoded" | jq --arg cfip "$cfip" --argjson cfport "$cfport" \
+            updated=$(echo "$decoded" | jq --arg cfip "$cfip" --arg cfport "$cfport" \
                 '.add = $cfip | .port = $cfport | .fp = "chrome" | .allowInsecure = false')
             new_encoded=$(echo "$updated" | base64 | tr -d '\n')
             new_vmess="vmess://$new_encoded"
@@ -857,13 +852,25 @@ EOF
             cat > /etc/init.d/argo << 'EOF'
 #!/sbin/openrc-run
 description="Cloudflare Tunnel (Fixed Token)"
-[ -f /etc/conf.d/argo ] && . /etc/conf.d/argo
-command="/etc/sing-box/argo"
-command_args="tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${ARGO_TOKEN}"
-command_background=true
 pidfile="/var/run/argo.pid"
-output_log="/etc/sing-box/argo.log"
-error_log="/etc/sing-box/argo.log"
+
+start() {
+    [ -f /etc/conf.d/argo ] && . /etc/conf.d/argo
+    ebegin "Starting argo"
+    start-stop-daemon --start --background \
+        --make-pidfile --pidfile "$pidfile" \
+        --stdout /etc/sing-box/argo.log \
+        --stderr /etc/sing-box/argo.log \
+        --exec /bin/sh -- -c \
+        "/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${ARGO_TOKEN}"
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping argo"
+    start-stop-daemon --stop --pidfile "$pidfile"
+    eend $?
+}
 EOF
             chmod +x /etc/init.d/argo
         fi
@@ -873,7 +880,8 @@ EOF
 
     restart_argo
     sleep 2
-    update_vmess_domain "$argo_domain"
+    # get_info 会生成/更新 url.txt 并写入正确的 Argo 域名
+    get_info
     green "\n固定隧道已配置完成，域名：${purple}${argo_domain}${re}\n"
 }
 
