@@ -471,11 +471,19 @@ cn_block_manage() {
             fi
             
             # --- 使用 jq 开启规则 ---
-            jq '.route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary","url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs","download_detour":"direct"}]' \
-                "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
-
-            jq '.route.rules = [{"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn","^([a-zA-Z0-9_-]+\\.)*googleapis\\.com","^([a-zA-Z0-9_-]+\\.)*gstatic\\.com","^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],"outbound":"direct"},{"rule_set":["geosite-cn"],"outbound":"block"}] + .route.rules' \
-                "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
+            jq '
+  .route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary",
+    "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+    "download_detour":"direct"}] |
+  .route.rules = [
+    {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn",
+      "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com",
+      "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com",
+      "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],
+     "outbound":"direct"},
+    {"rule_set":["geosite-cn"],"outbound":"block"}
+  ] + .route.rules
+' "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
             # ------------------------
 
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
