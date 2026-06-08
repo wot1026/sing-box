@@ -89,24 +89,9 @@ manage_packages() {
     return 0
 }
 
-# 获取真实 IP
+# 获取真实 IP（仅 IPv4）
 get_realip() {
-    ip=$(curl -4 -sm 2 ip.sb)
-    ipv6() { curl -6 -sm 2 ip.sb; }
-    if [ -z "$ip" ]; then
-        echo "[$(ipv6)]"
-    else
-        if curl -4 -sm 2 http://ipinfo.io/org | grep -qE 'Cloudflare|UnReal|AEZA|Andrei'; then
-            echo "[$(ipv6)]"
-        else
-            if grep -qE '^\s*precedence\s+::ffff:0:0/96\s+100' "/etc/gai.conf" 2>/dev/null; then
-                echo "$ip"
-            else
-                v6=$(ipv6)
-                [ -n "$v6" ] && echo "[$v6]" || echo "$ip"
-            fi
-        fi
-    fi
+    curl -4 -sm 3 ip.sb
 }
 
 # 获取国旗 emoji
@@ -168,10 +153,10 @@ allow_port() {
     }
     for rule in "$@"; do
         port=${rule%/*}; proto=${rule#*/}
-        [ "$has_ufw" -eq 1 ] && ufw allow in ${port}/${proto} >/dev/null 2>&1
-        [ "$has_firewalld" -eq 1 ] && firewall-cmd --permanent --add-port=${port}/${proto} >/dev/null 2>&1
-        [ "$has_iptables" -eq 1 ] && (iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || iptables -I INPUT 4 -p ${proto} --dport ${port} -j ACCEPT)
-        [ "$has_ip6tables" -eq 1 ] && (ip6tables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || ip6tables -I INPUT 4 -p ${proto} --dport ${port} -j ACCEPT)
+        [ "$has_ufw" -eq 1 ] && ufw allow in "${port}/${proto}" >/dev/null 2>&1
+        [ "$has_firewalld" -eq 1 ] && firewall-cmd --permanent --add-port="${port}/${proto}" >/dev/null 2>&1
+        [ "$has_iptables" -eq 1 ] && (iptables -C INPUT -p "${proto}" --dport "${port}" -j ACCEPT 2>/dev/null || iptables -I INPUT 4 -p "${proto}" --dport "${port}" -j ACCEPT)
+        [ "$has_ip6tables" -eq 1 ] && (ip6tables -C INPUT -p "${proto}" --dport "${port}" -j ACCEPT 2>/dev/null || ip6tables -I INPUT 4 -p "${proto}" --dport "${port}" -j ACCEPT)
     done
     [ "$has_firewalld" -eq 1 ] && firewall-cmd --reload >/dev/null 2>&1
 }
@@ -190,18 +175,19 @@ install_singbox() {
         *) red "不支持的架构: ${ARCH_RAW}"; exit 1 ;;
     esac
 
-    [ ! -d "${work_dir}" ] && mkdir -p "${work_dir}" && chmod 777 "${work_dir}" && mkdir -p "${conf_dir}"
+    [ ! -d "${work_dir}" ] && mkdir -p "${work_dir}" && chmod 755 "${work_dir}" && mkdir -p "${conf_dir}"
 
     curl -sLo "${work_dir}/qrencode" "https://$ARCH.ssss.nyc.mn/qrencode"
     curl -sLo "${work_dir}/sing-box" "https://$ARCH.ssss.nyc.mn/sbx-1.13.13"
     curl -sLo "${work_dir}/argo"     "https://$ARCH.ssss.nyc.mn/bot"
-    chown root:root ${work_dir}
-    chmod +x ${work_dir}/${server_name} ${work_dir}/argo ${work_dir}/qrencode
+    chown root:root "${work_dir}"
+    chmod 755 "${work_dir}"
+    chmod +x "${work_dir}/${server_name}" "${work_dir}/argo" "${work_dir}/qrencode"
 
     hy2_port=$(shuf -i 10000-65000 -n 1)
     uuid=$(cat /proc/sys/kernel/random/uuid)
 
-    allow_port ${ARGO_PORT}/tcp ${hy2_port}/udp > /dev/null 2>&1
+    allow_port "${ARGO_PORT}/tcp" "${hy2_port}/udp" > /dev/null 2>&1
 
     # 生成自签证书
     openssl ecparam -genkey -name prime256v1 -out "${work_dir}/private.key"
@@ -209,9 +195,6 @@ install_singbox() {
         -out "${work_dir}/cert.pem" -subj "/CN=bing.com"
     fingerprint=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" \
         | cut -d'=' -f2 | sed 's/:/%3A/g')
-
-    dns_strategy=$(ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1 && echo "prefer_ipv4" || \
-        (ping -c 1 -W 3 2001:4860:4860::8888 >/dev/null 2>&1 && echo "prefer_ipv6" || echo "prefer_ipv4"))
 
     # log
     cat > "${conf_dir}/log.json" << EOF
@@ -237,24 +220,24 @@ EOF
 }
 EOF
 
-    # dns
+    # dns（仅 IPv4）
     cat > "${conf_dir}/dns.json" << EOF
 {
   "dns": {
     "servers": [{"tag": "local", "type": "local"}],
-    "strategy": "${dns_strategy}"
+    "strategy": "ipv4_only"
   }
 }
 EOF
 
-    # inbounds：vmess-argo + hysteria2
+    # inbounds：vmess-argo + hysteria2（listen 0.0.0.0 仅 IPv4）
     cat > "${conf_dir}/inbounds.json" << EOF
 {
   "inbounds": [
     {
       "type": "vmess",
       "tag": "vmess-ws",
-      "listen": "::",
+      "listen": "0.0.0.0",
       "listen_port": ${ARGO_PORT},
       "users": [{"uuid": "${uuid}"}],
       "transport": {
@@ -266,7 +249,7 @@ EOF
     {
       "type": "hysteria2",
       "tag": "hysteria2",
-      "listen": "::",
+      "listen": "0.0.0.0",
       "listen_port": ${hy2_port},
       "users": [{"password": "${uuid}"}],
       "ignore_client_bandwidth": false,
@@ -427,10 +410,26 @@ start_argo()     { manage_service "argo" "start"; }
 stop_argo()      { manage_service "argo" "stop"; }
 restart_argo()   { manage_service "argo" "restart"; }
 
+# 判断当前是否使用固定隧道
+is_fixed_tunnel() {
+    if command_exists systemctl; then
+        grep -qE 'run --token|tunnel\.yml' /etc/systemd/system/argo.service 2>/dev/null
+    elif command_exists rc-service; then
+        grep -qE 'run --token|tunnel\.yml' /etc/init.d/argo 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+# 获取固定隧道域名
+get_fixed_domain() {
+    grep -oP '(?<=hostname: )\S+' "${work_dir}/tunnel.yml" 2>/dev/null | head -1
+}
+
 # 获取节点信息并输出链接
 get_info() {
     yellow "\nIP 检测中，请稍候...\n"
-    server_ip=$(get_realip)
+    server_ip=$(curl -4 -sm 3 ip.sb)
     node_prefix=$(get_node_name)
     clear
 
@@ -440,31 +439,39 @@ get_info() {
     fingerprint=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" \
         | cut -d'=' -f2 | sed 's/:/%3A/g')
 
-    # 获取 Argo 域名
-    if [ -f "${work_dir}/argo.log" ]; then
-        for i in {1..5}; do
-            purple "第 $i 次尝试获取 Argo 域名..."
-            argodomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
-            [ -n "$argodomain" ] && break
-            # 固定隧道
-            [ -z "$argodomain" ] && argodomain=$(grep -oP 'https://\K[^ ]+(?= )' "${work_dir}/argo.log" | head -1)
-            [ -n "$argodomain" ] && break
-            sleep 2
-        done
-    fi
-
-    # 检查是否为固定隧道
-    fixed_domain=""
-    if command_exists systemctl; then
-        if grep -q 'run --token' /etc/systemd/system/argo.service 2>/dev/null; then
-            fixed_domain=$(grep -oP '(?<=hostname: )\S+' "${work_dir}/tunnel.yml" 2>/dev/null || echo "")
+    # 获取 Argo 域名：固定隧道优先，否则从 argo.log 提取临时域名
+    argodomain=""
+    if is_fixed_tunnel; then
+        argodomain=$(get_fixed_domain)
+    else
+        if [ -f "${work_dir}/argo.log" ]; then
+            for i in {1..5}; do
+                purple "第 $i 次尝试获取 Argo 域名..."
+                argodomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
+                [ -n "$argodomain" ] && break
+                sleep 2
+            done
         fi
     fi
-    [ -n "$fixed_domain" ] && argodomain="$fixed_domain"
 
     green "\nArgo 域名：${purple}${argodomain}${re}\n"
 
-    VMESS_JSON="{ \"v\": \"2\", \"ps\": \"${node_prefix} argo\", \"add\": \"${CFIP}\", \"port\": \"${CFPORT}\", \"id\": \"${uuid}\", \"aid\": \"0\", \"scy\": \"none\", \"net\": \"ws\", \"type\": \"none\", \"host\": \"${argodomain}\", \"path\": \"/vmess-argo?ed=2560\", \"tls\": \"tls\", \"sni\": \"${argodomain}\", \"alpn\": \"\", \"fp\": \"\", \"allowInsecure\": \"false\"}"
+    # VMess JSON：allowInsecure 布尔 false，fp: chrome
+    VMESS_JSON=$(jq -n \
+        --arg ps  "${node_prefix} argo" \
+        --arg add "${CFIP}" \
+        --arg port "${CFPORT}" \
+        --arg id  "${uuid}" \
+        --arg host "${argodomain}" \
+        '{
+            v: "2", ps: $ps, add: $add, port: $port,
+            id: $id, aid: "0", scy: "none",
+            net: "ws", type: "none",
+            host: $host, path: "/vmess-argo?ed=2560",
+            tls: "tls", sni: $host,
+            alpn: "", fp: "chrome",
+            allowInsecure: false
+        }')
 
     cat > "${work_dir}/url.txt" << EOF
 vmess://$(echo "$VMESS_JSON" | base64 -w0)
@@ -477,21 +484,6 @@ EOF
     echo -e "${re}"
 }
 
-# Argo 临时隧道获取
-get_quick_tunnel() {
-    restart_argo
-    yellow "获取临时 Argo 域名中，请稍候...\n"
-    sleep 3
-    for i in {1..5}; do
-        purple "第 $i 次尝试..."
-        get_argodomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
-        [ -n "$get_argodomain" ] && break
-        sleep 2
-    done
-    green "Argo 域名：${purple}${get_argodomain}${re}\n"
-    ArgoDomain=$get_argodomain
-}
-
 # 更新 VMess Argo 域名到 url.txt
 change_argo_domain() {
     local content vmess_url encoded_vmess decoded_vmess updated_vmess encoded_updated new_vmess new_content
@@ -499,7 +491,10 @@ change_argo_domain() {
     vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
     encoded_vmess="${vmess_url#vmess://}"
     decoded_vmess=$(echo "$encoded_vmess" | base64 --decode)
-    updated_vmess=$(echo "$decoded_vmess" | jq --arg d "$ArgoDomain" '.host = $d | .sni = $d')
+    # 更新域名，同时确保 fp: chrome、allowInsecure 为布尔 false
+    updated_vmess=$(echo "$decoded_vmess" | jq \
+        --arg d "$ArgoDomain" \
+        '.host = $d | .sni = $d | .fp = "chrome" | .allowInsecure = false')
     encoded_updated=$(echo "$updated_vmess" | base64 | tr -d '\n')
     new_vmess="vmess://${encoded_updated}"
     new_content=$(echo "$content" | sed "s|$vmess_url|$new_vmess|")
@@ -526,6 +521,15 @@ cn_block_manage() {
     check_singbox &>/dev/null
     [ $? -eq 2 ] && { yellow "sing-box 尚未安装！"; sleep 1; menu; return; }
 
+    # 确保 python3 可用
+    if ! command_exists python3; then
+        yellow "正在安装 python3...\n"
+        manage_packages install python3
+        if ! command_exists python3; then
+            red "python3 安装失败，无法继续"; sleep 2; return
+        fi
+    fi
+
     local route_file="${conf_dir}/route.json"
     local block_enabled=false
     jq -e '.route.rules[] | select(.rule_set[]? == "geosite-cn")' "$route_file" >/dev/null 2>&1 && block_enabled=true
@@ -549,9 +553,8 @@ cn_block_manage() {
             if $block_enabled; then
                 yellow "大陆拦截已开启，无需重复操作\n"; sleep 1; return
             fi
-            # 添加 geosite-cn rule_set 和拦截规则（含 Google 白名单）
             python3 -c "
-import json
+import json, sys
 cfg = '${route_file}'
 with open(cfg) as f:
     c = json.load(f)
@@ -563,15 +566,15 @@ rules = [r for r in route.get('rules', []) if not (
     'rule_set' in r and r.get('outbound') in ('block', 'direct') and
     any(x in r.get('rule_set', []) for x in ['geosite-cn', 'geoip-cn'])
 )]
-rules = [r for r in rules if not 'domain_regex' in r or r.get('outbound') != 'direct']
+rules = [r for r in rules if not ('domain_regex' in r and r.get('outbound') == 'direct')]
 
 # Google 白名单
 rules.insert(0, {
     'domain_regex': [
-        '^([a-zA-Z0-9_-]+\\\\.)*googleapis\\\\.cn',
-        '^([a-zA-Z0-9_-]+\\\\.)*googleapis\\\\.com',
-        '^([a-zA-Z0-9_-]+\\\\.)*gstatic\\\\.com',
-        '^([a-zA-Z0-9_-]+\\\\.)*xn--ngstr-lra8j\\\\.com'
+        '^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn',
+        '^([a-zA-Z0-9_-]+\\.)*googleapis\\.com',
+        '^([a-zA-Z0-9_-]+\\.)*gstatic\\.com',
+        '^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com'
     ],
     'outbound': 'direct'
 })
@@ -596,7 +599,7 @@ c['route'] = route
 with open(cfg, 'w') as f:
     json.dump(c, f, indent=2, ensure_ascii=False)
 print('完成')
-"
+" || { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已开启\n"
             ;;
@@ -605,26 +608,24 @@ print('完成')
                 yellow "大陆拦截未开启\n"; sleep 1; return
             fi
             python3 -c "
-import json
+import json, sys
 cfg = '${route_file}'
 with open(cfg) as f:
     c = json.load(f)
 
 route = c['route']
-# 移除拦截相关规则
 route['rules'] = [r for r in route.get('rules', []) if not (
     ('rule_set' in r and 'geosite-cn' in r.get('rule_set', [])) or
     ('domain_regex' in r and r.get('outbound') == 'direct' and
      any('googleapis' in x for x in r.get('domain_regex', [])))
 )]
-# 移除 geosite-cn rule_set
 route['rule_set'] = [rs for rs in route.get('rule_set', []) if rs['tag'] != 'geosite-cn']
 c['route'] = route
 
 with open(cfg, 'w') as f:
     json.dump(c, f, indent=2, ensure_ascii=False)
 print('完成')
-"
+" || { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已关闭\n"
             ;;
@@ -677,7 +678,7 @@ change_config() {
             jq --argjson port "$new_port" \
                '(.inbounds[] | select(.type == "hysteria2").listen_port) = $port' \
                "$inbounds_file" > "${inbounds_file}.tmp" && mv "${inbounds_file}.tmp" "$inbounds_file"
-            allow_port ${new_port}/udp > /dev/null 2>&1
+            allow_port "${new_port}/udp" > /dev/null 2>&1
             restart_singbox
             get_info
             green "\nHysteria2 端口已修改为：${purple}${new_port}${re}\n"
@@ -688,12 +689,27 @@ change_config() {
             jq --argjson port "$new_port" \
                '(.inbounds[] | select(.type == "vmess").listen_port) = $port' \
                "$inbounds_file" > "${inbounds_file}.tmp" && mv "${inbounds_file}.tmp" "$inbounds_file"
-            allow_port ${new_port}/tcp > /dev/null 2>&1
+            allow_port "${new_port}/tcp" > /dev/null 2>&1
             if command_exists systemctl; then
                 sed -i "s/localhost:[0-9]*/localhost:${new_port}/" /etc/systemd/system/argo.service
+                systemctl daemon-reload
             fi
             restart_singbox
-            get_quick_tunnel && change_argo_domain
+            # 固定隧道只重启 argo，不切换到临时逻辑
+            if is_fixed_tunnel; then
+                restart_argo
+                green "\n固定隧道端口已更新，argo 已重启\n"
+            else
+                ArgoDomain=""
+                restart_argo
+                sleep 3
+                for i in {1..5}; do
+                    ArgoDomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
+                    [ -n "$ArgoDomain" ] && break
+                    sleep 2
+                done
+                change_argo_domain
+            fi
             get_info
             green "\nVMess-Argo 端口已修改为：${purple}${new_port}${re}\n"
             ;;
@@ -715,11 +731,11 @@ change_config() {
                     fi
                     ;;
             esac
-            # 更新 url.txt 里 vmess 的 add/port
             vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
             encoded="${vmess_url#vmess://}"
             decoded=$(echo "$encoded" | base64 --decode 2>/dev/null)
-            updated=$(echo "$decoded" | jq --arg cfip "$cfip" --argjson cfport "$cfport" '.add = $cfip | .port = $cfport')
+            updated=$(echo "$decoded" | jq --arg cfip "$cfip" --argjson cfport "$cfport" \
+                '.add = $cfip | .port = $cfport | .fp = "chrome" | .allowInsecure = false')
             new_encoded=$(echo "$updated" | base64 -w0)
             new_vmess="vmess://$new_encoded"
             sed -i "s|$vmess_url|$new_vmess|" "$client_dir"
@@ -727,7 +743,7 @@ change_config() {
             purple "$new_vmess\n"
             ;;
         5)
-            new_ipv4=$(curl -4 -sm 2 ip.sb)
+            new_ipv4=$(curl -4 -sm 3 ip.sb)
             [[ ! "$new_ipv4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && { red "\n获取 IPv4 失败\n"; return 1; }
             sed -i -E "/^hysteria2:\/\// s#@\[[0-9a-fA-F:]+\]#@${new_ipv4}#g" "$client_dir"
             green "\n节点 IP 已切换为 IPv4: ${purple}${new_ipv4}${re}\n"
@@ -761,8 +777,6 @@ manage_argo() {
     skyblue "--------------"
     green "5. 切换回临时隧道"
     skyblue "---------------"
-    green "6. 重新获取临时域名"
-    skyblue "-----------------"
     purple "0. 返回主菜单"
     skyblue "------------"
     reading "\n请输入选择: " choice
@@ -770,11 +784,8 @@ manage_argo() {
         1) start_argo ;;
         2) stop_argo ;;
         3)
-            if command_exists systemctl; then
-                grep -q 'ExecStart=.*--url http://localhost' /etc/systemd/system/argo.service && \
-                    get_quick_tunnel && change_argo_domain || \
-                    { green "\n当前使用固定隧道，无需获取临时域名"; sleep 2; }
-            fi
+            # 无论固定还是临时，都执行重启
+            restart_argo
             ;;
         4)
             clear
@@ -798,24 +809,35 @@ ingress:
 EOF
                 sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --config /etc/sing-box/tunnel.yml run 2>&1"' \
                     /etc/systemd/system/argo.service
+                systemctl daemon-reload
                 restart_argo; sleep 1; change_argo_domain
             elif [[ $argo_auth =~ ^[A-Z0-9a-z=]{120,250}$ ]]; then
                 sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token '$argo_auth' 2>&1"' \
                     /etc/systemd/system/argo.service
+                systemctl daemon-reload
                 restart_argo; sleep 1; change_argo_domain
             else
                 yellow "输入不匹配，请重新输入"; manage_argo
             fi
             ;;
         5)
-            if command_exists systemctl; then main_systemd_services; fi
-            get_quick_tunnel; change_argo_domain
-            ;;
-        6)
+            # 仅重置 argo.service ExecStart 为临时隧道，不动 sing-box
             if command_exists systemctl; then
-                grep -q 'ExecStart=.*--url http://localhost' /etc/systemd/system/argo.service && \
-                    get_quick_tunnel && change_argo_domain || \
-                    { yellow "当前使用固定隧道，无法获取临时域名"; sleep 2; }
+                sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --url http://localhost:'"${ARGO_PORT}"' --no-autoupdate --edge-ip-version auto --protocol http2 > /etc/sing-box/argo.log 2>&1"' \
+                    /etc/systemd/system/argo.service
+                systemctl daemon-reload
+                restart_argo
+                sleep 3
+                ArgoDomain=""
+                for i in {1..5}; do
+                    purple "第 $i 次尝试获取临时域名..."
+                    ArgoDomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
+                    [ -n "$ArgoDomain" ] && break
+                    sleep 2
+                done
+                [ -n "$ArgoDomain" ] && change_argo_domain || red "未能获取临时域名，请手动重启 argo\n"
+            else
+                red "当前系统不支持 systemctl，无法操作"
             fi
             ;;
         0) menu ;;
@@ -979,14 +1001,26 @@ case "$1" in
         check_nodes; exit 0
         ;;
     -r|--restart)
-        get_quick_tunnel; change_argo_domain; exit 0
+        if is_fixed_tunnel; then
+            red "当前使用固定隧道，-r 仅适用于临时隧道"; exit 1
+        fi
+        ArgoDomain=""
+        restart_argo
+        sleep 3
+        for i in {1..5}; do
+            ArgoDomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
+            [ -n "$ArgoDomain" ] && break
+            sleep 2
+        done
+        [ -n "$ArgoDomain" ] && change_argo_domain || red "未能获取临时域名"
+        exit 0
         ;;
     -h|--help)
         echo ""
         green "用法: sb [参数]"
         green "  -i, --install     无交互安装"
         green "  -c, --check       查看节点信息"
-        green "  -r, --restart     重新获取 Argo 临时隧道"
+        green "  -r, --restart     重新获取 Argo 临时隧道（仅临时隧道有效）"
         green "  -u, --uninstall   无交互卸载"
         green "  -h, --help        显示帮助"
         green "  不带参数          进入交互式主菜单"
