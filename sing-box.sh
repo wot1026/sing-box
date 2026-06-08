@@ -2,7 +2,7 @@
 
 # =========================
 # 自用 sing-box 安装脚本
-# 协议: vmess-argo + hysteria2
+# 协议: vmess-argo(固定隧道) + hysteria2
 # 最后更新时间: 2026.6.8
 # =========================
 
@@ -29,6 +29,18 @@ conf_dir="${work_dir}/conf"
 client_dir="${work_dir}/url.txt"
 SCRIPT_URL="https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/sing-box.sh"
 
+# 二进制哈希校验（SHA256，按架构填写实际值）
+HASH_SINGBOX_amd64=""
+HASH_SINGBOX_arm64=""
+HASH_SINGBOX_386=""
+HASH_SINGBOX_armv7=""
+HASH_SINGBOX_s390x=""
+HASH_ARGO_amd64=""
+HASH_ARGO_arm64=""
+HASH_ARGO_386=""
+HASH_ARGO_armv7=""
+HASH_ARGO_s390x=""
+
 export ARGO_PORT=${ARGO_PORT:-'8001'}
 export CFIP=${CFIP:-'cf.877774.xyz'}
 export CFPORT=${CFPORT:-'443'}
@@ -38,17 +50,56 @@ export CFPORT=${CFPORT:-'443'}
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-# 服务状态检查
+# 二进制哈希校验
+verify_binary() {
+    local file="$1"
+    local expected_hash="$2"
+    local name="$3"
+
+    # 若未配置预期哈希，跳过校验并警告
+    if [ -z "$expected_hash" ]; then
+        yellow "警告：${name} 未配置哈希校验，跳过验证\n"
+        return 0
+    fi
+
+    local actual_hash
+    actual_hash=$(sha256sum "$file" | awk '{print $1}')
+    if [ "$actual_hash" != "$expected_hash" ]; then
+        red "校验失败：${name} 哈希不匹配！"
+        red "期望: ${expected_hash}"
+        red "实际: ${actual_hash}"
+        rm -f "$file"
+        return 1
+    fi
+    green "${name} 校验通过\n"
+    return 0
+}
+
+# 服务状态检查（修复返回值：running=0, not running=1, not installed=2）
 check_service() {
     local service_name=$1
     local service_file=$2
-    [[ ! -f "${service_file}" ]] && { red "not installed"; return 2; }
-    if command_exists apk; then
-        rc-service "${service_name}" status | grep -q "started" && green "running" || yellow "not running"
-    else
-        systemctl is-active "${service_name}" | grep -q "^active$" && green "running" || yellow "not running"
+    if [[ ! -f "${service_file}" ]]; then
+        red "not installed"
+        return 2
     fi
-    return $?
+    if command_exists apk; then
+        if rc-service "${service_name}" status 2>/dev/null | grep -q "started"; then
+            green "running"
+            return 0
+        else
+            yellow "not running"
+            return 1
+        fi
+    else
+        if systemctl is-active "${service_name}" 2>/dev/null | grep -q "^active$"; then
+            green "running"
+            return 0
+        else
+            yellow "not running"
+            return 1
+        fi
+    fi
 }
 
 check_singbox() { check_service "sing-box" "${work_dir}/${server_name}"; }
@@ -97,27 +148,17 @@ get_realip() {
 # 获取国旗 emoji
 get_flag() {
     local country_code
-    country_code=$(curl -sm 3 -H "User-Agent: Mozilla/5.0" "https://api.ip.sb/geoip" | \
-        tr -d '\n' | awk -F\" '{for(x=1;x<=NF;x++){if($x=="country_code")print $(x+2)}}')
+    # 优先用 jq 解析，已安装 jq
+    country_code=$(curl -sm 3 -H "User-Agent: Mozilla/5.0" "https://api.ip.sb/geoip" \
+        | jq -r '.country_code // empty' 2>/dev/null)
     [ -z "$country_code" ] && country_code=$(curl -sm 3 "https://ipapi.co/country_code" 2>/dev/null)
     case "$country_code" in
-        US) echo "🇺🇸" ;;
-        KR) echo "🇰🇷" ;;
-        JP) echo "🇯🇵" ;;
-        HK) echo "🇭🇰" ;;
-        SG) echo "🇸🇬" ;;
-        DE) echo "🇩🇪" ;;
-        GB) echo "🇬🇧" ;;
-        FR) echo "🇫🇷" ;;
-        NL) echo "🇳🇱" ;;
-        CA) echo "🇨🇦" ;;
-        AU) echo "🇦🇺" ;;
-        TW) echo "🇹🇼" ;;
-        CN) echo "🇨🇳" ;;
-        RU) echo "🇷🇺" ;;
-        IN) echo "🇮🇳" ;;
-        BR) echo "🇧🇷" ;;
-        *)  echo "🌐" ;;
+        US) echo "🇺🇸" ;; KR) echo "🇰🇷" ;; JP) echo "🇯🇵" ;;
+        HK) echo "🇭🇰" ;; SG) echo "🇸🇬" ;; DE) echo "🇩🇪" ;;
+        GB) echo "🇬🇧" ;; FR) echo "🇫🇷" ;; NL) echo "🇳🇱" ;;
+        CA) echo "🇨🇦" ;; AU) echo "🇦🇺" ;; TW) echo "🇹🇼" ;;
+        CN) echo "🇨🇳" ;; RU) echo "🇷🇺" ;; IN) echo "🇮🇳" ;;
+        BR) echo "🇧🇷" ;; *)  echo "🌐" ;;
     esac
 }
 
@@ -167,19 +208,27 @@ install_singbox() {
     purple "正在安装 sing-box，请稍候..."
     ARCH_RAW=$(uname -m)
     case "${ARCH_RAW}" in
-        'x86_64'|'amd64')  ARCH='amd64' ;;
+        'x86_64'|'amd64')    ARCH='amd64' ;;
         'x86'|'i686'|'i386') ARCH='386' ;;
-        'aarch64'|'arm64') ARCH='arm64' ;;
-        'armv7l') ARCH='armv7' ;;
-        's390x')  ARCH='s390x' ;;
+        'aarch64'|'arm64')   ARCH='arm64' ;;
+        'armv7l')             ARCH='armv7' ;;
+        's390x')              ARCH='s390x' ;;
         *) red "不支持的架构: ${ARCH_RAW}"; exit 1 ;;
     esac
 
     [ ! -d "${work_dir}" ] && mkdir -p "${work_dir}" && chmod 755 "${work_dir}" && mkdir -p "${conf_dir}"
 
+    # 下载二进制
     curl -sLo "${work_dir}/qrencode" "https://$ARCH.ssss.nyc.mn/qrencode"
     curl -sLo "${work_dir}/sing-box" "https://$ARCH.ssss.nyc.mn/sbx-1.13.13"
     curl -sLo "${work_dir}/argo"     "https://$ARCH.ssss.nyc.mn/bot"
+
+    # 哈希校验（变量名动态拼接）
+    eval "hash_sb=\${HASH_SINGBOX_${ARCH}}"
+    eval "hash_argo=\${HASH_ARGO_${ARCH}}"
+    verify_binary "${work_dir}/sing-box" "$hash_sb"  "sing-box" || exit 1
+    verify_binary "${work_dir}/argo"     "$hash_argo" "argo"     || exit 1
+
     chown root:root "${work_dir}"
     chmod 755 "${work_dir}"
     chmod +x "${work_dir}/${server_name}" "${work_dir}/argo" "${work_dir}/qrencode"
@@ -193,8 +242,6 @@ install_singbox() {
     openssl ecparam -genkey -name prime256v1 -out "${work_dir}/private.key"
     openssl req -new -x509 -days 3650 -key "${work_dir}/private.key" \
         -out "${work_dir}/cert.pem" -subj "/CN=bing.com"
-    fingerprint=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" \
-        | cut -d'=' -f2 | sed 's/:/%3A/g')
 
     # log
     cat > "${conf_dir}/log.json" << EOF
@@ -230,7 +277,7 @@ EOF
 }
 EOF
 
-    # inbounds：vmess-argo + hysteria2（listen 0.0.0.0 仅 IPv4）
+    # inbounds：vmess-argo + hysteria2
     cat > "${conf_dir}/inbounds.json" << EOF
 {
   "inbounds": [
@@ -277,7 +324,7 @@ EOF
 }
 EOF
 
-    # route（默认无大陆拦截，大陆拦截通过菜单手动开启）
+    # route
     cat > "${conf_dir}/route.json" << EOF
 {
   "route": {
@@ -288,7 +335,7 @@ EOF
 }
 EOF
 
-    # experimental（cache_file 用于 rule_set 缓存）
+    # experimental
     cat > "${conf_dir}/experimental.json" << EOF
 {
   "experimental": {
@@ -301,11 +348,12 @@ EOF
 EOF
 
     green "sing-box 核心安装完成\n"
+    yellow "注意：Argo 固定隧道需在主菜单 -> Argo 隧道管理 中配置后才能使用 VMess 节点\n"
 }
 
-# systemd 服务
+# systemd 服务（argo 初始为占位，配置固定隧道后再启动）
 main_systemd_services() {
-    cat > /etc/systemd/system/sing-box.service << EOF
+    cat > /etc/systemd/system/sing-box.service << 'EOF'
 [Unit]
 Description=sing-box service
 Documentation=https://sing-box.sagernet.org
@@ -317,7 +365,7 @@ WorkingDirectory=/etc/sing-box
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 ExecStart=/etc/sing-box/sing-box run -C /etc/sing-box/conf
-ExecReload=/bin/kill -HUP \$MAINPID
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=infinity
@@ -326,16 +374,18 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
 
+    # argo 服务：仅固定隧道，ExecStart 由配置函数写入
     cat > /etc/systemd/system/argo.service << EOF
 [Unit]
-Description=Cloudflare Tunnel
+Description=Cloudflare Tunnel (Fixed)
 After=network.target
 
 [Service]
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --url http://localhost:${ARGO_PORT} --no-autoupdate --edge-ip-version auto --protocol http2 > /etc/sing-box/argo.log 2>&1"
+EnvironmentFile=-/etc/sing-box/argo.env
+ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --config /etc/sing-box/tunnel.yml run 2>&1"
 Restart=on-failure
 RestartSec=5s
 
@@ -352,10 +402,11 @@ EOF
     fi
     systemctl daemon-reload
     systemctl enable sing-box && systemctl start sing-box
-    systemctl enable argo     && systemctl start argo
+    # argo 不在此处启动，等固定隧道配置完成后再启动
+    systemctl enable argo
 }
 
-# alpine openrc
+# alpine openrc（仅固定隧道）
 alpine_openrc_services() {
     cat > /etc/init.d/sing-box << 'EOF'
 #!/sbin/openrc-run
@@ -365,13 +416,15 @@ command_args="run -C /etc/sing-box/conf"
 command_background=true
 pidfile="/var/run/sing-box.pid"
 EOF
-    cat > /etc/init.d/argo << EOF
+    cat > /etc/init.d/argo << 'EOF'
 #!/sbin/openrc-run
-description="Cloudflare Tunnel"
-command="/bin/sh"
-command_args="-c '/etc/sing-box/argo tunnel --url http://localhost:${ARGO_PORT} --no-autoupdate --edge-ip-version auto --protocol http2 > /etc/sing-box/argo.log 2>&1'"
+description="Cloudflare Tunnel (Fixed)"
+command="/etc/sing-box/argo"
+command_args="tunnel --edge-ip-version auto --config /etc/sing-box/tunnel.yml run"
 command_background=true
 pidfile="/var/run/argo.pid"
+output_log="/etc/sing-box/argo.log"
+error_log="/etc/sing-box/argo.log"
 EOF
     chmod +x /etc/init.d/sing-box /etc/init.d/argo
     rc-update add sing-box default > /dev/null 2>&1
@@ -410,20 +463,44 @@ start_argo()     { manage_service "argo" "start"; }
 stop_argo()      { manage_service "argo" "stop"; }
 restart_argo()   { manage_service "argo" "restart"; }
 
-# 判断当前是否使用固定隧道
-is_fixed_tunnel() {
-    if command_exists systemctl; then
-        grep -qE 'run --token|tunnel\.yml' /etc/systemd/system/argo.service 2>/dev/null
-    elif command_exists rc-service; then
-        grep -qE 'run --token|tunnel\.yml' /etc/init.d/argo 2>/dev/null
-    else
-        return 1
-    fi
-}
-
 # 获取固定隧道域名
 get_fixed_domain() {
     grep -oP '(?<=hostname: )\S+' "${work_dir}/tunnel.yml" 2>/dev/null | head -1
+}
+
+# 检查固定隧道是否已配置
+is_fixed_tunnel_configured() {
+    [ -f "${work_dir}/tunnel.yml" ]
+}
+
+# 更新 url.txt 中的 VMess Argo 域名（接受参数，不依赖全局变量）
+update_vmess_domain() {
+    local new_domain="$1"
+    if [ -z "$new_domain" ]; then
+        red "域名为空，无法更新 VMess 节点\n"
+        return 1
+    fi
+    if [ ! -f "$client_dir" ]; then
+        red "url.txt 不存在，请先完成节点信息生成\n"
+        return 1
+    fi
+
+    local vmess_url encoded_vmess decoded_vmess updated_vmess encoded_updated new_vmess
+    vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
+    if [ -z "$vmess_url" ]; then
+        red "未找到 VMess 节点，无法更新\n"
+        return 1
+    fi
+    encoded_vmess="${vmess_url#vmess://}"
+    decoded_vmess=$(echo "$encoded_vmess" | base64 --decode 2>/dev/null)
+    updated_vmess=$(echo "$decoded_vmess" | jq \
+        --arg d "$new_domain" \
+        '.host = $d | .sni = $d | .fp = "chrome" | .allowInsecure = false')
+    encoded_updated=$(echo "$updated_vmess" | base64 | tr -d '\n')
+    new_vmess="vmess://${encoded_updated}"
+    sed -i "s|${vmess_url}|${new_vmess}|" "$client_dir"
+    green "VMess 节点已更新\n"
+    purple "$new_vmess\n"
 }
 
 # 获取节点信息并输出链接
@@ -433,35 +510,29 @@ get_info() {
     node_prefix=$(get_node_name)
     clear
 
-    # 从配置读取端口和 UUID
     hy2_port=$(jq -r '.inbounds[] | select(.type == "hysteria2") | .listen_port' "${conf_dir}/inbounds.json")
     uuid=$(jq -r '.inbounds[] | select(.type == "vmess") | .users[0].uuid' "${conf_dir}/inbounds.json")
     fingerprint=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" \
         | cut -d'=' -f2 | sed 's/:/%3A/g')
 
-    # 获取 Argo 域名：固定隧道优先，否则从 argo.log 提取临时域名
-    argodomain=""
-    if is_fixed_tunnel; then
+    # 固定隧道域名
+    local argodomain=""
+    if is_fixed_tunnel_configured; then
         argodomain=$(get_fixed_domain)
-    else
-        if [ -f "${work_dir}/argo.log" ]; then
-            for i in {1..5}; do
-                purple "第 $i 次尝试获取 Argo 域名..."
-                argodomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
-                [ -n "$argodomain" ] && break
-                sleep 2
-            done
-        fi
     fi
 
-    green "\nArgo 域名：${purple}${argodomain}${re}\n"
+    if [ -z "$argodomain" ]; then
+        yellow "未检测到固定隧道域名，VMess 节点暂不可用，请先配置 Argo 固定隧道\n"
+    else
+        green "\nArgo 域名：${purple}${argodomain}${re}\n"
+    fi
 
-    # VMess JSON：allowInsecure 布尔 false，fp: chrome
+    local VMESS_JSON
     VMESS_JSON=$(jq -n \
-        --arg ps  "${node_prefix} argo" \
-        --arg add "${CFIP}" \
+        --arg ps   "${node_prefix} argo" \
+        --arg add  "${CFIP}" \
         --arg port "${CFPORT}" \
-        --arg id  "${uuid}" \
+        --arg id   "${uuid}" \
         --arg host "${argodomain}" \
         '{
             v: "2", ps: $ps, add: $add, port: $port,
@@ -474,7 +545,7 @@ get_info() {
         }')
 
     cat > "${work_dir}/url.txt" << EOF
-vmess://$(echo "$VMESS_JSON" | base64 -w0)
+vmess://$(echo "$VMESS_JSON" | base64 | tr -d '\n')
 
 hysteria2://${uuid}@${server_ip}:${hy2_port}/?sni=bing.com&insecure=1&pinSHA256=${fingerprint}&alpn=h3&obfs=none#${node_prefix} hy2
 EOF
@@ -482,25 +553,6 @@ EOF
     echo ""
     while IFS= read -r line; do echo -e "${purple}$line"; done < "${work_dir}/url.txt"
     echo -e "${re}"
-}
-
-# 更新 VMess Argo 域名到 url.txt
-change_argo_domain() {
-    local content vmess_url encoded_vmess decoded_vmess updated_vmess encoded_updated new_vmess new_content
-    content=$(cat "$client_dir")
-    vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
-    encoded_vmess="${vmess_url#vmess://}"
-    decoded_vmess=$(echo "$encoded_vmess" | base64 --decode)
-    # 更新域名，同时确保 fp: chrome、allowInsecure 为布尔 false
-    updated_vmess=$(echo "$decoded_vmess" | jq \
-        --arg d "$ArgoDomain" \
-        '.host = $d | .sni = $d | .fp = "chrome" | .allowInsecure = false')
-    encoded_updated=$(echo "$updated_vmess" | base64 | tr -d '\n')
-    new_vmess="vmess://${encoded_updated}"
-    new_content=$(echo "$content" | sed "s|$vmess_url|$new_vmess|")
-    echo "$new_content" > "$client_dir"
-    green "VMess 节点已更新\n"
-    purple "$new_vmess\n"
 }
 
 # 查看节点
@@ -521,7 +573,6 @@ cn_block_manage() {
     check_singbox &>/dev/null
     [ $? -eq 2 ] && { yellow "sing-box 尚未安装！"; sleep 1; menu; return; }
 
-    # 确保 python3 可用
     if ! command_exists python3; then
         yellow "正在安装 python3...\n"
         manage_packages install python3
@@ -553,22 +604,20 @@ cn_block_manage() {
             if $block_enabled; then
                 yellow "大陆拦截已开启，无需重复操作\n"; sleep 1; return
             fi
-            python3 -c "
-import json, sys
-cfg = '${route_file}'
+            # 用环境变量传路径，避免插值问题
+            ROUTE_CFG="$route_file" python3 << 'PYEOF'
+import json, os, sys
+cfg = os.environ['ROUTE_CFG']
 with open(cfg) as f:
     c = json.load(f)
 
 route = c['route']
-
-# 清理旧规则
 rules = [r for r in route.get('rules', []) if not (
     'rule_set' in r and r.get('outbound') in ('block', 'direct') and
     any(x in r.get('rule_set', []) for x in ['geosite-cn', 'geoip-cn'])
 )]
 rules = [r for r in rules if not ('domain_regex' in r and r.get('outbound') == 'direct')]
 
-# Google 白名单
 rules.insert(0, {
     'domain_regex': [
         '^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn',
@@ -578,11 +627,9 @@ rules.insert(0, {
     ],
     'outbound': 'direct'
 })
-# block 规则
 rules.insert(1, {'rule_set': ['geosite-cn'], 'outbound': 'block'})
 route['rules'] = rules
 
-# rule_set 定义
 rule_sets = route.get('rule_set', [])
 tags = [rs['tag'] for rs in rule_sets]
 if 'geosite-cn' not in tags:
@@ -599,7 +646,8 @@ c['route'] = route
 with open(cfg, 'w') as f:
     json.dump(c, f, indent=2, ensure_ascii=False)
 print('完成')
-" || { red "配置写入失败"; sleep 2; return; }
+PYEOF
+            [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已开启\n"
             ;;
@@ -607,9 +655,9 @@ print('完成')
             if ! $block_enabled; then
                 yellow "大陆拦截未开启\n"; sleep 1; return
             fi
-            python3 -c "
-import json, sys
-cfg = '${route_file}'
+            ROUTE_CFG="$route_file" python3 << 'PYEOF'
+import json, os
+cfg = os.environ['ROUTE_CFG']
 with open(cfg) as f:
     c = json.load(f)
 
@@ -625,7 +673,8 @@ c['route'] = route
 with open(cfg, 'w') as f:
     json.dump(c, f, indent=2, ensure_ascii=False)
 print('完成')
-" || { red "配置写入失败"; sleep 2; return; }
+PYEOF
+            [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已关闭\n"
             ;;
@@ -639,7 +688,8 @@ change_config() {
     check_singbox &>/dev/null
     [ $? -eq 2 ] && { yellow "sing-box 尚未安装！"; sleep 1; menu; return; }
 
-    local singbox_status=$(check_singbox 2>/dev/null)
+    local singbox_status
+    check_singbox > /tmp/_sb_status 2>&1; singbox_status=$(cat /tmp/_sb_status)
     clear; echo ""
     green "=== 修改节点配置 ===\n"
     green "sing-box 当前状态: ${singbox_status}\n"
@@ -690,26 +740,12 @@ change_config() {
                '(.inbounds[] | select(.type == "vmess").listen_port) = $port' \
                "$inbounds_file" > "${inbounds_file}.tmp" && mv "${inbounds_file}.tmp" "$inbounds_file"
             allow_port "${new_port}/tcp" > /dev/null 2>&1
-            if command_exists systemctl; then
-                sed -i "s/localhost:[0-9]*/localhost:${new_port}/" /etc/systemd/system/argo.service
-                systemctl daemon-reload
+            # 更新 tunnel.yml 中的 service 端口
+            if [ -f "${work_dir}/tunnel.yml" ]; then
+                sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" "${work_dir}/tunnel.yml"
             fi
             restart_singbox
-            # 固定隧道只重启 argo，不切换到临时逻辑
-            if is_fixed_tunnel; then
-                restart_argo
-                green "\n固定隧道端口已更新，argo 已重启\n"
-            else
-                ArgoDomain=""
-                restart_argo
-                sleep 3
-                for i in {1..5}; do
-                    ArgoDomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
-                    [ -n "$ArgoDomain" ] && break
-                    sleep 2
-                done
-                change_argo_domain
-            fi
+            restart_argo
             get_info
             green "\nVMess-Argo 端口已修改为：${purple}${new_port}${re}\n"
             ;;
@@ -719,9 +755,9 @@ change_config() {
             reading "请输入优选域名或 IP（直接回车默认 cf.877774.xyz）: " cfip_input
             case "$cfip_input" in
                 ""|"2") cfip="cf.877774.xyz"; cfport="443" ;;
-                "1") cfip="cf.090227.xyz"; cfport="443" ;;
-                "3") cfip="cf.877771.xyz"; cfport="443" ;;
-                "4") cfip="cdns.doon.eu.org"; cfport="443" ;;
+                "1")    cfip="cf.090227.xyz"; cfport="443" ;;
+                "3")    cfip="cf.877771.xyz"; cfport="443" ;;
+                "4")    cfip="cdns.doon.eu.org"; cfport="443" ;;
                 *)
                     if [[ "$cfip_input" =~ : ]]; then
                         cfip=$(echo "$cfip_input" | cut -d':' -f1)
@@ -731,14 +767,15 @@ change_config() {
                     fi
                     ;;
             esac
+            local vmess_url encoded decoded updated new_encoded new_vmess
             vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
             encoded="${vmess_url#vmess://}"
             decoded=$(echo "$encoded" | base64 --decode 2>/dev/null)
             updated=$(echo "$decoded" | jq --arg cfip "$cfip" --argjson cfport "$cfport" \
                 '.add = $cfip | .port = $cfport | .fp = "chrome" | .allowInsecure = false')
-            new_encoded=$(echo "$updated" | base64 -w0)
+            new_encoded=$(echo "$updated" | base64 | tr -d '\n')
             new_vmess="vmess://$new_encoded"
-            sed -i "s|$vmess_url|$new_vmess|" "$client_dir"
+            sed -i "s|${vmess_url}|${new_vmess}|" "$client_dir"
             green "\nCF 优选域名已更新为：${purple}${cfip}:${cfport}${re}\n"
             purple "$new_vmess\n"
             ;;
@@ -761,85 +798,113 @@ change_config() {
     esac
 }
 
-# Argo 隧道管理
+# 配置固定 Argo 隧道（写入 tunnel.yml，token 存 env 文件）
+configure_fixed_tunnel() {
+    clear
+    yellow "\n固定隧道支持 json 或 token 两种方式，端口为 ${ARGO_PORT}\njson 获取：${purple}https://fscarmen.cloudflare.now.cc${re}\n"
+    reading "\n请输入 Argo 域名: " argo_domain
+    if [ -z "$argo_domain" ]; then
+        red "域名不能为空"; return 1
+    fi
+    reading "\n请输入 Argo 密钥（token 或 json）: " argo_auth
+    if [ -z "$argo_auth" ]; then
+        red "密钥不能为空"; return 1
+    fi
+
+    if [[ $argo_auth =~ TunnelSecret ]]; then
+        # JSON 凭据
+        echo "$argo_auth" > "${work_dir}/tunnel.json"
+        local tunnel_id
+        tunnel_id=$(echo "$argo_auth" | jq -r '.TunnelID // empty' 2>/dev/null)
+        [ -z "$tunnel_id" ] && tunnel_id=$(cut -d'"' -f12 <<< "$argo_auth")
+        cat > "${work_dir}/tunnel.yml" << EOF
+tunnel: ${tunnel_id}
+credentials-file: ${work_dir}/tunnel.json
+protocol: http2
+
+ingress:
+  - hostname: ${argo_domain}
+    service: http://localhost:${ARGO_PORT}
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
+EOF
+        # systemd：直接用 tunnel.yml，不含敏感信息
+        if command_exists systemctl; then
+            sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --config /etc/sing-box/tunnel.yml run 2>&1"' \
+                /etc/systemd/system/argo.service
+            systemctl daemon-reload
+        fi
+
+    elif [[ $argo_auth =~ ^[A-Z0-9a-z=]{120,250}$ ]]; then
+        # Token 凭据：写入独立 env 文件，服务读取，避免暴露在 ExecStart
+        echo "ARGO_TOKEN=${argo_auth}" > "${work_dir}/argo.env"
+        chmod 600 "${work_dir}/argo.env"
+        # tunnel.yml 仅用于记录域名（argo token 模式不需要 tunnel.yml，此处仅占位供 get_fixed_domain 使用）
+        cat > "${work_dir}/tunnel.yml" << EOF
+# token mode - domain record only
+hostname: ${argo_domain}
+EOF
+        if command_exists systemctl; then
+            # 从 env 文件读取 token
+            sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token \${ARGO_TOKEN} 2>&1"' \
+                /etc/systemd/system/argo.service
+            systemctl daemon-reload
+        elif command_exists rc-service; then
+            # Alpine：将 token 写入 openrc conf
+            echo "ARGO_TOKEN=${argo_auth}" > "/etc/conf.d/argo"
+            chmod 600 "/etc/conf.d/argo"
+            cat > /etc/init.d/argo << 'EOF'
+#!/sbin/openrc-run
+description="Cloudflare Tunnel (Fixed Token)"
+[ -f /etc/conf.d/argo ] && . /etc/conf.d/argo
+command="/etc/sing-box/argo"
+command_args="tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${ARGO_TOKEN}"
+command_background=true
+pidfile="/var/run/argo.pid"
+output_log="/etc/sing-box/argo.log"
+error_log="/etc/sing-box/argo.log"
+EOF
+            chmod +x /etc/init.d/argo
+        fi
+    else
+        yellow "输入格式不匹配，请重新配置"; return 1
+    fi
+
+    restart_argo
+    sleep 2
+    update_vmess_domain "$argo_domain"
+    green "\n固定隧道已配置完成，域名：${purple}${argo_domain}${re}\n"
+}
+
+# Argo 隧道管理（仅固定隧道）
 manage_argo() {
-    local argo_status=$(check_argo 2>/dev/null)
+    local argo_status
+    check_argo > /tmp/_argo_status 2>&1; argo_status=$(cat /tmp/_argo_status)
     clear; echo ""
-    green "=== Argo 隧道管理 ===\n"
+    green "=== Argo 隧道管理（固定隧道）===\n"
     green "Argo 当前状态: ${argo_status}\n"
+    if is_fixed_tunnel_configured; then
+        green "当前域名: ${purple}$(get_fixed_domain)${re}\n"
+    else
+        yellow "固定隧道尚未配置\n"
+    fi
     green "1. 启动 Argo"
     skyblue "------------"
     green "2. 停止 Argo"
     skyblue "------------"
     green "3. 重启 Argo"
     skyblue "------------"
-    green "4. 添加固定隧道"
+    green "4. 配置固定隧道"
     skyblue "--------------"
-    green "5. 切换回临时隧道"
-    skyblue "---------------"
     purple "0. 返回主菜单"
     skyblue "------------"
     reading "\n请输入选择: " choice
     case "$choice" in
         1) start_argo ;;
         2) stop_argo ;;
-        3)
-            # 无论固定还是临时，都执行重启
-            restart_argo
-            ;;
-        4)
-            clear
-            yellow "\n固定隧道可为 json 或 token，端口为 ${ARGO_PORT}\njson 获取：${purple}https://fscarmen.cloudflare.now.cc${re}\n"
-            reading "\n请输入 Argo 域名: " argo_domain
-            ArgoDomain=$argo_domain
-            reading "\n请输入 Argo 密钥（token 或 json）: " argo_auth
-            if [[ $argo_auth =~ TunnelSecret ]]; then
-                echo $argo_auth > ${work_dir}/tunnel.json
-                cat > ${work_dir}/tunnel.yml << EOF
-tunnel: $(cut -d\" -f12 <<< "$argo_auth")
-credentials-file: ${work_dir}/tunnel.json
-protocol: http2
-
-ingress:
-  - hostname: $ArgoDomain
-    service: http://localhost:${ARGO_PORT}
-    originRequest:
-      noTLSVerify: true
-  - service: http_status:404
-EOF
-                sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --config /etc/sing-box/tunnel.yml run 2>&1"' \
-                    /etc/systemd/system/argo.service
-                systemctl daemon-reload
-                restart_argo; sleep 1; change_argo_domain
-            elif [[ $argo_auth =~ ^[A-Z0-9a-z=]{120,250}$ ]]; then
-                sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token '$argo_auth' 2>&1"' \
-                    /etc/systemd/system/argo.service
-                systemctl daemon-reload
-                restart_argo; sleep 1; change_argo_domain
-            else
-                yellow "输入不匹配，请重新输入"; manage_argo
-            fi
-            ;;
-        5)
-            # 仅重置 argo.service ExecStart 为临时隧道，不动 sing-box
-            if command_exists systemctl; then
-                sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --url http://localhost:'"${ARGO_PORT}"' --no-autoupdate --edge-ip-version auto --protocol http2 > /etc/sing-box/argo.log 2>&1"' \
-                    /etc/systemd/system/argo.service
-                systemctl daemon-reload
-                restart_argo
-                sleep 3
-                ArgoDomain=""
-                for i in {1..5}; do
-                    purple "第 $i 次尝试获取临时域名..."
-                    ArgoDomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
-                    [ -n "$ArgoDomain" ] && break
-                    sleep 2
-                done
-                [ -n "$ArgoDomain" ] && change_argo_domain || red "未能获取临时域名，请手动重启 argo\n"
-            else
-                red "当前系统不支持 systemctl，无法操作"
-            fi
-            ;;
+        3) restart_argo ;;
+        4) configure_fixed_tunnel ;;
         0) menu ;;
         *) red "无效选项！" ;;
     esac
@@ -847,7 +912,8 @@ EOF
 
 # sing-box 管理
 manage_singbox() {
-    local singbox_status=$(check_singbox 2>/dev/null)
+    local singbox_status
+    check_singbox > /tmp/_sb_status 2>&1; singbox_status=$(cat /tmp/_sb_status)
     clear; echo ""
     green "=== sing-box 管理 ===\n"
     green "sing-box 当前状态: ${singbox_status}\n"
@@ -877,7 +943,7 @@ uninstall_singbox() {
             yellow "正在卸载 sing-box...\n"
             if command_exists rc-service; then
                 rc-service sing-box stop; rc-service argo stop
-                rm -f /etc/init.d/sing-box /etc/init.d/argo
+                rm -f /etc/init.d/sing-box /etc/init.d/argo /etc/conf.d/argo
                 rc-update del sing-box default; rc-update del argo default
             else
                 systemctl stop sing-box argo
@@ -886,7 +952,7 @@ uninstall_singbox() {
             fi
             rm -rf "${work_dir}"
             rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
-            rm -f /usr/bin/sb
+            rm -f /usr/bin/sb /tmp/_sb_status /tmp/_argo_status
             green "\nsing-box 卸载成功\n"
             exit 0
             ;;
@@ -928,8 +994,9 @@ change_hosts() {
 
 # 主菜单
 menu() {
-    singbox_status=$(check_singbox 2>/dev/null)
-    argo_status=$(check_argo 2>/dev/null)
+    local singbox_status argo_status
+    check_singbox > /tmp/_sb_status   2>&1; singbox_status=$(cat /tmp/_sb_status)
+    check_argo    > /tmp/_argo_status 2>&1; argo_status=$(cat /tmp/_argo_status)
 
     clear; echo ""
     purple "=== 自用 sing-box 安装脚本 ===\n"
@@ -947,8 +1014,6 @@ menu() {
     green  "7. 大陆域名拦截"
     echo   "==============="
     green  "8. 更新脚本"
-    echo   "==============="
-    purple "9. SSH 综合工具箱"
     echo   "==============="
     red    "0. 退出脚本"
     echo   "==========="
@@ -970,14 +1035,13 @@ case "$1" in
             alpine_openrc_services
             change_hosts
             rc-service sing-box restart
-            rc-service argo restart
         else
             red "不支持的 init 系统"; exit 1
         fi
-        sleep 5
-        get_info
-        create_shortcut
+        sleep 3
         green "\nsing-box 安装完成\n"
+        yellow "请进入菜单 -> Argo 隧道管理 -> 配置固定隧道，再使用 sb -c 查看节点\n"
+        create_shortcut
         ;;
     -u|--uninstall)
         yellow "正在无交互卸载 sing-box...\n"
@@ -986,7 +1050,7 @@ case "$1" in
             rc-service argo stop >/dev/null 2>&1
             rc-update del sing-box default >/dev/null 2>&1
             rc-update del argo default >/dev/null 2>&1
-            rm -f /etc/init.d/sing-box /etc/init.d/argo
+            rm -f /etc/init.d/sing-box /etc/init.d/argo /etc/conf.d/argo
         elif command_exists systemctl; then
             systemctl stop sing-box argo >/dev/null 2>&1
             systemctl disable sing-box argo >/dev/null 2>&1
@@ -994,33 +1058,17 @@ case "$1" in
             rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
         fi
         rm -rf "${work_dir}"
-        rm -f /usr/bin/sb
+        rm -f /usr/bin/sb /tmp/_sb_status /tmp/_argo_status
         green "\nsing-box 卸载完成\n"
         ;;
     -c|--check)
         check_nodes; exit 0
         ;;
-    -r|--restart)
-        if is_fixed_tunnel; then
-            red "当前使用固定隧道，-r 仅适用于临时隧道"; exit 1
-        fi
-        ArgoDomain=""
-        restart_argo
-        sleep 3
-        for i in {1..5}; do
-            ArgoDomain=$(sed -n 's|.*https://\([^/]*trycloudflare\.com\).*|\1|p' "${work_dir}/argo.log")
-            [ -n "$ArgoDomain" ] && break
-            sleep 2
-        done
-        [ -n "$ArgoDomain" ] && change_argo_domain || red "未能获取临时域名"
-        exit 0
-        ;;
     -h|--help)
         echo ""
         green "用法: sb [参数]"
-        green "  -i, --install     无交互安装"
+        green "  -i, --install     无交互安装（安装后需手动配置固定隧道）"
         green "  -c, --check       查看节点信息"
-        green "  -r, --restart     重新获取 Argo 临时隧道（仅临时隧道有效）"
         green "  -u, --uninstall   无交互卸载"
         green "  -h, --help        显示帮助"
         green "  不带参数          进入交互式主菜单"
@@ -1030,7 +1078,7 @@ case "$1" in
     "")
         while true; do
             menu
-            reading "请输入选择(0-9): " choice
+            reading "请输入选择(0-8): " choice
             echo ""
             need_pause=true
             case "$choice" in
@@ -1047,12 +1095,11 @@ case "$1" in
                             alpine_openrc_services
                             change_hosts
                             rc-service sing-box restart
-                            rc-service argo restart
                         else
                             red "不支持的 init 系统"; exit 1
                         fi
-                        sleep 5
-                        get_info
+                        sleep 3
+                        green "\nsing-box 安装完成，请进入 Argo 隧道管理配置固定隧道\n"
                         create_shortcut
                     fi
                     ;;
@@ -1063,20 +1110,15 @@ case "$1" in
                 6) change_config;     need_pause=true ;;
                 7) cn_block_manage;   need_pause=true ;;
                 8) update_script;     need_pause=false ;;
-                9)
-                    clear
-                    bash <(curl -Ls ssh_tool.eooce.com)
-                    need_pause=false
-                    ;;
                 0) exit 0 ;;
-                *) red "无效的选项，请输入 0-9"; need_pause=true ;;
+                *) red "无效的选项，请输入 0-8"; need_pause=true ;;
             esac
             [ "$need_pause" = true ] && read -n 1 -s -r -p $'\033[1;91m按任意键返回...\033[0m'
         done
         ;;
     *)
         red "未知参数: $1"
-        green "用法: sb [-i|-u|-c|-r|-h]"
+        green "用法: sb [-i|-u|-c|-h]"
         exit 1
         ;;
 esac
