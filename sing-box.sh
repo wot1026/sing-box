@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # =========================
 # 自用 sing-box 安装脚本
 # 协议: vmess-argo(固定隧道) + hysteria2
@@ -25,12 +23,6 @@ conf_dir="${work_dir}/conf"
 client_dir="${work_dir}/url.txt"
 SCRIPT_URL="https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/sing-box.sh"
 
-# SHA256 哈希（填写后启用校验，留空则安装时询问）
-HASH_SINGBOX_amd64=""
-HASH_SINGBOX_arm64=""
-HASH_ARGO_amd64=""
-HASH_ARGO_arm64=""
-
 export ARGO_PORT=${ARGO_PORT:-'8001'}
 export CFIP=${CFIP:-'cf.877774.xyz'}
 export CFPORT=${CFPORT:-'443'}
@@ -40,27 +32,6 @@ export CFPORT=${CFPORT:-'443'}
 command -v systemctl >/dev/null 2>&1 || { red "本脚本仅支持 systemd 系统（Ubuntu/Debian）"; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
-
-# ── 哈希校验 ──────────────────────────────────────
-verify_binary() {
-    local file="$1" expected="$2" name="$3"
-    if [ -z "$expected" ]; then
-        yellow "警告：${name} 未配置哈希，无法验证完整性！"
-        reading "是否继续安装？(y/n): " ans
-        [[ "$ans" != [yY] ]] && { red "已取消安装"; return 1; }
-        return 0
-    fi
-    local actual
-    actual=$(sha256sum "$file" | awk '{print $1}')
-    if [ "$actual" != "$expected" ]; then
-        red "校验失败：${name} 哈希不匹配！"
-        red "期望: ${expected}"
-        red "实际: ${actual}"
-        rm -f "$file"
-        return 1
-    fi
-    green "${name} 校验通过"
-}
 
 # ── 服务状态检查 ───────────────────────────────────
 check_service() {
@@ -96,14 +67,14 @@ allow_port() {
     [ $has_ufw -eq 1 ] && ufw --force default allow outgoing >/dev/null 2>&1
 
     if [ $has_iptables -eq 1 ]; then
-        iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT 3 -i lo -j ACCEPT
-        iptables -C INPUT -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT 4 -p icmp -j ACCEPT
+        iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
+        iptables -C INPUT -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
         iptables -P FORWARD DROP 2>/dev/null || true
         iptables -P OUTPUT ACCEPT 2>/dev/null || true
     fi
     if [ $has_ip6tables -eq 1 ]; then
-        ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || ip6tables -I INPUT 3 -i lo -j ACCEPT
-        ip6tables -C INPUT -p icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT 4 -p icmp -j ACCEPT
+        ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || ip6tables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
+        ip6tables -C INPUT -p icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
         ip6tables -P FORWARD DROP 2>/dev/null || true
         ip6tables -P OUTPUT ACCEPT 2>/dev/null || true
     fi
@@ -113,11 +84,11 @@ allow_port() {
         [ $has_ufw -eq 1 ] && ufw allow in "${port}/${proto}" >/dev/null 2>&1
         if [ $has_iptables -eq 1 ]; then
             iptables  -C INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null \
-                || iptables  -I INPUT 4 -p "$proto" --dport "$port" -j ACCEPT
+                || iptables  -A INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
         fi
         if [ $has_ip6tables -eq 1 ]; then
             ip6tables -C INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null \
-                || ip6tables -I INPUT 4 -p "$proto" --dport "$port" -j ACCEPT
+                || ip6tables -A INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
         fi
     done
 }
@@ -140,12 +111,17 @@ get_flag() {
 
 get_node_name() { echo "$(get_flag) $(hostname)"; }
 
-# ── Hysteria2 指纹（base64 格式，用 python3 转换避免 xxd 依赖）──
+# ── Hysteria2 指纹（base64 格式）─────────────────
 get_hy2_fingerprint() {
     local hex
     hex=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" 2>/dev/null \
         | cut -d'=' -f2 | tr -d ':')
-    python3 -c "import base64, bytes as _b; print(base64.b64encode(bytes.fromhex('${hex}')).decode().rstrip('='))"
+    [ -z "$hex" ] && { echo ""; return; }
+    echo "$hex" | python3 -c "
+import sys, base64
+h = sys.stdin.read().strip()
+print(base64.b64encode(bytes.fromhex(h)).decode().rstrip('='))
+"
 }
 
 # ── 安装核心 ──────────────────────────────────────
@@ -175,12 +151,6 @@ install_singbox() {
     yellow "正在下载 qrencode..."
     curl -fsSLo "${work_dir}/qrencode" "https://${arch}.ssss.nyc.mn/qrencode" \
         || { red "qrencode 下载失败"; exit 1; }
-
-    local hash_sb hash_argo
-    eval "hash_sb=\${HASH_SINGBOX_${arch}}"
-    eval "hash_argo=\${HASH_ARGO_${arch}}"
-    verify_binary "${work_dir}/sing-box" "$hash_sb"  "sing-box" || exit 1
-    verify_binary "${work_dir}/argo"     "$hash_argo" "argo"     || exit 1
 
     chmod +x "${work_dir}/sing-box" "${work_dir}/argo" "${work_dir}/qrencode"
     chown root:root "${work_dir}/sing-box" "${work_dir}/argo"
@@ -323,7 +293,6 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
 
-    # argo 服务占位，配置固定隧道后会覆盖 ExecStart
     cat > /etc/systemd/system/argo.service << 'EOF'
 [Unit]
 Description=Cloudflare Tunnel
@@ -343,7 +312,6 @@ EOF
 
     systemctl daemon-reload
     systemctl enable sing-box && systemctl start sing-box
-    # argo 只 enable，不 start，等隧道配置完再启动
     systemctl enable argo
 }
 
@@ -395,7 +363,6 @@ get_info() {
     [ -z "$server_ip" ] && { red "获取 IP 失败"; return 1; }
     node_prefix=$(get_node_name)
 
-    # 读取持久化的 CF 优选配置
     if [ -f "${work_dir}/cf.env" ]; then
         local _cfip _cfport
         _cfip=$(grep  '^CFIP='   "${work_dir}/cf.env" | cut -d'=' -f2-)
@@ -603,7 +570,6 @@ change_config() {
                 "$inbounds_file" > "${inbounds_file}.tmp" \
                 && mv "${inbounds_file}.tmp" "$inbounds_file"
             allow_port "${new_port}/tcp"
-            # 同步更新 tunnel.yml 中的本地端口
             if [ -f "${work_dir}/tunnel.yml" ]; then
                 sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
                     "${work_dir}/tunnel.yml"
@@ -652,7 +618,6 @@ configure_fixed_tunnel() {
     [ -z "$argo_auth" ] && { red "密钥不能为空"; return 1; }
 
     if [[ "$argo_auth" =~ TunnelSecret ]]; then
-        # JSON 凭据模式
         echo "$argo_auth" > "${work_dir}/tunnel.json"
         chmod 600 "${work_dir}/tunnel.json"
         local tunnel_id
@@ -673,7 +638,6 @@ ingress:
       noTLSVerify: true
   - service: http_status:404
 EOF
-        # 直接写死路径，不用变量引用
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -692,7 +656,6 @@ WantedBy=multi-user.target
 EOF
 
     elif [[ "$argo_auth" =~ ^[A-Za-z0-9=]{120,250}$ ]]; then
-        # Token 模式：token 直接写进 ExecStart，不用环境变量
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
