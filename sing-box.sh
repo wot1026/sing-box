@@ -814,7 +814,7 @@ menu() {
     green  "3. sing-box 管理"
     green  "4. Argo 隧道管理"
     echo   "==============="
-    green  "5. 查看节点信息"
+    green  "5. 刷新节点信息"
     green  "6. 修改节点配置"
     echo   "==============="
     green  "7. 大陆域名拦截"
@@ -889,7 +889,7 @@ case "$1" in
                 2) uninstall_singbox;  need_pause=false ;;
                 3) manage_singbox;     need_pause=false ;;
                 4) manage_argo;        need_pause=true ;;
-                5) check_nodes;        need_pause=true ;;
+                5) get_info;           need_pause=true ;;
                 6) change_config;      need_pause=true ;;
                 7) cn_block_manage;    need_pause=true ;;
                 8) update_script;      need_pause=false ;;
