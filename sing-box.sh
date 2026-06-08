@@ -51,14 +51,16 @@ export CFPORT=${CFPORT:-'443'}
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
 # 二进制哈希校验
+# FIX[P1]: 空哈希时询问用户是否继续，而非静默跳过
 verify_binary() {
     local file="$1"
     local expected_hash="$2"
     local name="$3"
 
-    # 若未配置预期哈希，跳过校验并警告
     if [ -z "$expected_hash" ]; then
-        yellow "警告：${name} 未配置哈希校验，跳过验证\n"
+        yellow "警告：${name} 未配置哈希校验，无法验证文件完整性！"
+        reading "是否继续安装？(y/n): " ans
+        [ "$ans" != "y" ] && [ "$ans" != "Y" ] && { red "已取消安装"; return 1; }
         return 0
     fi
 
@@ -75,7 +77,8 @@ verify_binary() {
     return 0
 }
 
-# 服务状态检查（修复返回值：running=0, not running=1, not installed=2）
+# 服务状态检查
+# running=0, not running=1, not installed=2
 check_service() {
     local service_name=$1
     local service_file=$2
@@ -143,7 +146,6 @@ manage_packages() {
 # 获取国旗 emoji
 get_flag() {
     local country_code
-    # 优先用 jq 解析，已安装 jq
     country_code=$(curl -sm 3 -H "User-Agent: Mozilla/5.0" "https://api.ip.sb/geoip" \
         | jq -r '.country_code // empty' 2>/dev/null)
     [ -z "$country_code" ] && country_code=$(curl -sm 3 "https://ipapi.co/country_code" 2>/dev/null)
@@ -219,7 +221,7 @@ install_singbox() {
     curl -sLo "${work_dir}/sing-box" "https://$ARCH.ssss.nyc.mn/sbx-1.13.13"
     curl -sLo "${work_dir}/argo"     "https://$ARCH.ssss.nyc.mn/bot"
 
-    # 哈希校验（变量名动态拼接）
+    # 哈希校验
     eval "hash_sb=\${HASH_SINGBOX_${ARCH}}"
     eval "hash_argo=\${HASH_ARGO_${ARCH}}"
     verify_binary "${work_dir}/sing-box" "$hash_sb"  "sing-box" || exit 1
@@ -347,7 +349,7 @@ EOF
     yellow "注意：Argo 固定隧道需在主菜单 -> Argo 隧道管理 中配置后才能使用 VMess 节点\n"
 }
 
-# systemd 服务（argo 初始为占位，配置固定隧道后再启动）
+# systemd 服务
 main_systemd_services() {
     cat > /etc/systemd/system/sing-box.service << 'EOF'
 [Unit]
@@ -370,7 +372,6 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
 
-    # argo 服务：仅固定隧道，ExecStart 由配置函数写入
     cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel (Fixed)
@@ -398,11 +399,10 @@ EOF
     fi
     systemctl daemon-reload
     systemctl enable sing-box && systemctl start sing-box
-    # argo 不在此处启动，等固定隧道配置完成后再启动
     systemctl enable argo
 }
 
-# alpine openrc（仅固定隧道）
+# alpine openrc
 alpine_openrc_services() {
     cat > /etc/init.d/sing-box << 'EOF'
 #!/sbin/openrc-run
@@ -434,7 +434,7 @@ manage_service() {
         start)
             yellow "正在启动 ${service_name}...\n"
             if command_exists rc-service; then rc-service "$service_name" start
-            else systemctl daemon-reload && systemctl start "$service_name"; fi
+            else systemctl start "$service_name"; fi
             [ $? -eq 0 ] && green "${service_name} 已启动\n" || red "${service_name} 启动失败\n"
             ;;
         stop)
@@ -446,7 +446,8 @@ manage_service() {
         restart)
             yellow "正在重启 ${service_name}...\n"
             if command_exists rc-service; then rc-service "$service_name" restart
-            else systemctl daemon-reload && systemctl restart "$service_name"; fi
+            # FIX[P3]: restart 不需要 daemon-reload，只有 service 文件变动后才需要
+            else systemctl restart "$service_name"; fi
             [ $? -eq 0 ] && green "${service_name} 已重启\n" || red "${service_name} 重启失败\n"
             ;;
     esac
@@ -469,17 +470,36 @@ is_fixed_tunnel_configured() {
     [ -f "${work_dir}/tunnel.yml" ]
 }
 
+# FIX[P0]: Hysteria2 pinSHA256 应为 base64 格式，原版 %3A 十六进制编码客户端不识别
+get_hy2_fingerprint() {
+    openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" 2>/dev/null \
+        | cut -d'=' -f2 \
+        | tr -d ':' \
+        | tr '[:upper:]' '[:lower:]' \
+        | xxd -r -p 2>/dev/null \
+        | base64 \
+        | tr -d '='
+}
+
 # 获取节点信息并输出链接
 get_info() {
     yellow "\nIP 检测中，请稍候...\n"
     server_ip=$(curl -4 -sm 3 ip.sb)
     node_prefix=$(get_node_name)
+
+    # FIX[P1]: 读取持久化的 CF 优选配置，覆盖环境变量默认值
+    if [ -f "${work_dir}/cf.env" ]; then
+        # shellcheck source=/dev/null
+        source "${work_dir}/cf.env"
+    fi
+
     clear
 
     hy2_port=$(jq -r '.inbounds[] | select(.type == "hysteria2") | .listen_port' "${conf_dir}/inbounds.json")
     uuid=$(jq -r '.inbounds[] | select(.type == "vmess") | .users[0].uuid' "${conf_dir}/inbounds.json")
-    fingerprint=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" \
-        | cut -d'=' -f2 | sed 's/:/%3A/g')
+
+    # FIX[P0]: 使用 base64 格式 fingerprint
+    fingerprint=$(get_hy2_fingerprint)
 
     # 固定隧道域名
     local argodomain=""
@@ -570,7 +590,6 @@ cn_block_manage() {
             if $block_enabled; then
                 yellow "大陆拦截已开启，无需重复操作\n"; sleep 1; return
             fi
-            # 用环境变量传路径，避免插值问题
             ROUTE_CFG="$route_file" python3 << 'PYEOF'
 import json, os, sys
 cfg = os.environ['ROUTE_CFG']
@@ -706,7 +725,6 @@ change_config() {
                '(.inbounds[] | select(.type == "vmess").listen_port) = $port' \
                "$inbounds_file" > "${inbounds_file}.tmp" && mv "${inbounds_file}.tmp" "$inbounds_file"
             allow_port "${new_port}/tcp" > /dev/null 2>&1
-            # 更新 tunnel.yml 中的 service 端口
             if [ -f "${work_dir}/tunnel.yml" ]; then
                 sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" "${work_dir}/tunnel.yml"
             fi
@@ -716,6 +734,7 @@ change_config() {
             green "\nVMess-Argo 端口已修改为：${purple}${new_port}${re}\n"
             ;;
         4)
+            # FIX[P1]: CF 优选域名持久化写入 cf.env，get_info() 每次读取，不再依赖内存变量
             clear
             green "1: cf.090227.xyz  2: cf.877774.xyz  3: cf.877771.xyz  4: cdns.doon.eu.org\n"
             reading "请输入优选域名或 IP（直接回车默认 cf.877774.xyz）: " cfip_input
@@ -733,17 +752,12 @@ change_config() {
                     fi
                     ;;
             esac
-            local vmess_url encoded decoded updated new_encoded new_vmess
-            vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
-            encoded="${vmess_url#vmess://}"
-            decoded=$(echo "$encoded" | base64 --decode 2>/dev/null)
-            updated=$(echo "$decoded" | jq --arg cfip "$cfip" --arg cfport "$cfport" \
-                '.add = $cfip | .port = $cfport | .fp = "chrome" | .allowInsecure = false')
-            new_encoded=$(echo "$updated" | base64 | tr -d '\n')
-            new_vmess="vmess://$new_encoded"
-            sed -i "s|${vmess_url}|${new_vmess}|" "$client_dir"
+            # 持久化保存
+            printf 'CFIP=%s\nCFPORT=%s\n' "$cfip" "$cfport" > "${work_dir}/cf.env"
+            # 更新内存变量，让本次 get_info 立即生效
+            CFIP="$cfip"; CFPORT="$cfport"
+            get_info
             green "\nCF 优选域名已更新为：${purple}${cfip}:${cfport}${re}\n"
-            purple "$new_vmess\n"
             ;;
         5)
             new_ipv4=$(curl -4 -sm 3 ip.sb)
@@ -764,7 +778,7 @@ change_config() {
     esac
 }
 
-# 配置固定 Argo 隧道（写入 tunnel.yml，token 存 env 文件）
+# 配置固定 Argo 隧道
 configure_fixed_tunnel() {
     clear
     yellow "\n固定隧道支持 json 或 token 两种方式，端口为 ${ARGO_PORT}\njson 获取：${purple}https://fscarmen.cloudflare.now.cc${re}\n"
@@ -795,7 +809,6 @@ ingress:
       noTLSVerify: true
   - service: http_status:404
 EOF
-        # systemd：直接用 tunnel.yml，不含敏感信息
         if command_exists systemctl; then
             sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --config /etc/sing-box/tunnel.yml run 2>&1"' \
                 /etc/systemd/system/argo.service
@@ -803,45 +816,37 @@ EOF
         fi
 
     elif [[ $argo_auth =~ ^[A-Z0-9a-z=]{120,250}$ ]]; then
-        # Token 凭据：写入独立 env 文件，服务读取，避免暴露在 ExecStart
+        # Token 凭据
         echo "ARGO_TOKEN=${argo_auth}" > "${work_dir}/argo.env"
         chmod 600 "${work_dir}/argo.env"
-        # tunnel.yml 仅用于记录域名（argo token 模式不需要 tunnel.yml，此处仅占位供 get_fixed_domain 使用）
+        # tunnel.yml 仅记录域名供 get_fixed_domain 使用
         cat > "${work_dir}/tunnel.yml" << EOF
 # token mode - domain record only
 hostname: ${argo_domain}
 EOF
         if command_exists systemctl; then
-            # 从 env 文件读取 token
             sed -i '/^ExecStart=/c ExecStart=/bin/sh -c "/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token \${ARGO_TOKEN} 2>&1"' \
                 /etc/systemd/system/argo.service
             systemctl daemon-reload
         elif command_exists rc-service; then
-            # Alpine：将 token 写入 openrc conf
+            # FIX[P2]: Alpine token 模式改用独立启动脚本，避免 busybox ash 引号嵌套问题
             echo "ARGO_TOKEN=${argo_auth}" > "/etc/conf.d/argo"
             chmod 600 "/etc/conf.d/argo"
+            cat > "${work_dir}/argo-start.sh" << 'ARGO_START'
+#!/bin/sh
+[ -f /etc/conf.d/argo ] && . /etc/conf.d/argo
+exec /etc/sing-box/argo tunnel --edge-ip-version auto \
+    --no-autoupdate --protocol http2 run --token "$ARGO_TOKEN"
+ARGO_START
+            chmod +x "${work_dir}/argo-start.sh"
             cat > /etc/init.d/argo << 'EOF'
 #!/sbin/openrc-run
 description="Cloudflare Tunnel (Fixed Token)"
+command="/etc/sing-box/argo-start.sh"
+command_background=true
 pidfile="/var/run/argo.pid"
-
-start() {
-    [ -f /etc/conf.d/argo ] && . /etc/conf.d/argo
-    ebegin "Starting argo"
-    start-stop-daemon --start --background \
-        --make-pidfile --pidfile "$pidfile" \
-        --stdout /etc/sing-box/argo.log \
-        --stderr /etc/sing-box/argo.log \
-        --exec /bin/sh -- -c \
-        "/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${ARGO_TOKEN}"
-    eend $?
-}
-
-stop() {
-    ebegin "Stopping argo"
-    start-stop-daemon --stop --pidfile "$pidfile"
-    eend $?
-}
+output_log="/etc/sing-box/argo.log"
+error_log="/etc/sing-box/argo.log"
 EOF
             chmod +x /etc/init.d/argo
         fi
@@ -851,12 +856,11 @@ EOF
 
     restart_argo
     sleep 2
-    # get_info 会生成/更新 url.txt 并写入正确的 Argo 域名
     get_info
     green "\n固定隧道已配置完成，域名：${purple}${argo_domain}${re}\n"
 }
 
-# Argo 隧道管理（仅固定隧道）
+# Argo 隧道管理
 manage_argo() {
     local argo_status
     check_argo > /tmp/_argo_status 2>&1; argo_status=$(cat /tmp/_argo_status)
@@ -950,17 +954,20 @@ EOF
     [ -s /usr/bin/sb ] && green "\n快捷指令 sb 创建成功\n" || red "\n快捷指令创建失败\n"
 }
 
-# 更新脚本
+# FIX[P2]: 更新脚本前校验内容有效性，防止下载被劫持或 GitHub 返回 404 HTML
 update_script() {
     yellow "正在从 GitHub 更新脚本...\n"
-    curl -Ls "${SCRIPT_URL}" -o "${work_dir}/sb.sh"
-    if [ $? -eq 0 ]; then
+    local tmp_file="${work_dir}/sb.sh.tmp"
+    curl -Ls "${SCRIPT_URL}" -o "$tmp_file"
+    if [ $? -eq 0 ] && grep -q "sing-box" "$tmp_file" && [ "$(wc -l < "$tmp_file")" -gt 50 ]; then
+        mv "$tmp_file" "${work_dir}/sb.sh"
         chmod +x "${work_dir}/sb.sh"
         ln -sf "${work_dir}/sb.sh" /usr/bin/sb
         green "脚本已更新完成，请重新运行 sb\n"
         exit 0
     else
-        red "更新失败，请检查网络或 GitHub 链接\n"
+        rm -f "$tmp_file"
+        red "更新失败：下载内容异常或网络错误，已回滚\n"
     fi
 }
 
@@ -1002,8 +1009,9 @@ trap 'red "\n强制退出"; exit' INT
 
 case "$1" in
     -i|--install)
+        # FIX[P0]: $? -ne 2 才是真正的"已安装"（0=running, 1=stopped, 2=not installed）
         check_singbox &>/dev/null
-        if [ $? -eq 0 ]; then
+        if [ $? -ne 2 ]; then
             yellow "sing-box 已安装，跳过"; exit 0
         fi
         manage_packages install jq tar openssl lsof coreutils
@@ -1062,8 +1070,9 @@ case "$1" in
             need_pause=true
             case "$choice" in
                 1)
+                    # FIX[P0]: 同上，ne 2 = 已安装
                     check_singbox &>/dev/null; singbox_check=$?
-                    if [ $singbox_check -eq 0 ]; then
+                    if [ $singbox_check -ne 2 ]; then
                         yellow "sing-box 已经安装！\n"
                     else
                         manage_packages install jq tar openssl lsof coreutils
