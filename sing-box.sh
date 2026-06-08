@@ -469,40 +469,15 @@ cn_block_manage() {
             if $block_enabled; then
                 yellow "大陆拦截已开启，无需重复操作\n"; sleep 1; return
             fi
-            ROUTE_CFG="$route_file" python3 << 'PYEOF'
-import json, os
-cfg = os.environ['ROUTE_CFG']
-with open(cfg) as f:
-    c = json.load(f)
-route = c['route']
-rules = [r for r in route.get('rules', []) if not (
-    ('rule_set' in r and r.get('outbound') in ('block','direct') and
-     any(x in r.get('rule_set',[]) for x in ['geosite-cn','geoip-cn'])) or
-    ('domain_regex' in r and r.get('outbound') == 'direct')
-)]
-rules.insert(0, {
-    'domain_regex': [
-        '^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn',
-        '^([a-zA-Z0-9_-]+\\.)*googleapis\\.com',
-        '^([a-zA-Z0-9_-]+\\.)*gstatic\\.com',
-        '^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com'
-    ],
-    'outbound': 'direct'
-})
-rules.insert(1, {'rule_set': ['geosite-cn'], 'outbound': 'block'})
-route['rules'] = rules
-rule_sets = route.get('rule_set', [])
-if 'geosite-cn' not in [rs['tag'] for rs in rule_sets]:
-    rule_sets.append({
-        'type': 'remote', 'tag': 'geosite-cn', 'format': 'binary',
-        'url': 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs',
-        'download_detour': 'direct'
-    })
-route['rule_set'] = rule_sets
-c['route'] = route
-with open(cfg, 'w') as f:
-    json.dump(c, f, indent=2, ensure_ascii=False)
-PYEOF
+            
+            # --- 使用 jq 开启规则 ---
+            jq '.route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary","url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs","download_detour":"direct"}]' \
+                "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
+
+            jq '.route.rules = [{"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn","^([a-zA-Z0-9_-]+\\.)*googleapis\\.com","^([a-zA-Z0-9_-]+\\.)*gstatic\\.com","^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],"outbound":"direct"},{"rule_set":["geosite-cn"],"outbound":"block"}] + .route.rules' \
+                "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
+            # ------------------------
+
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已开启\n"
@@ -511,22 +486,14 @@ PYEOF
             if ! $block_enabled; then
                 yellow "大陆拦截未开启\n"; sleep 1; return
             fi
-            ROUTE_CFG="$route_file" python3 << 'PYEOF'
-import json, os
-cfg = os.environ['ROUTE_CFG']
-with open(cfg) as f:
-    c = json.load(f)
-route = c['route']
-route['rules'] = [r for r in route.get('rules', []) if not (
-    ('rule_set' in r and 'geosite-cn' in r.get('rule_set', [])) or
-    ('domain_regex' in r and r.get('outbound') == 'direct' and
-     any('googleapis' in x for x in r.get('domain_regex', [])))
-)]
-route['rule_set'] = [rs for rs in route.get('rule_set', []) if rs['tag'] != 'geosite-cn']
-c['route'] = route
-with open(cfg, 'w') as f:
-    json.dump(c, f, indent=2, ensure_ascii=False)
-PYEOF
+            
+            # --- 使用 jq 关闭规则 ---
+            jq 'del(.route.rules[] | select(.rule_set[]? == "geosite-cn")) |
+                del(.route.rules[] | select(.domain_regex? and .outbound == "direct")) |
+                del(.route.rule_set[] | select(.tag == "geosite-cn"))' \
+                "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
+            # ------------------------
+
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已关闭\n"
