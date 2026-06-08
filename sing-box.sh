@@ -211,7 +211,8 @@ install_singbox() {
         *) red "不支持的架构: ${ARCH_RAW}"; exit 1 ;;
     esac
 
-    [ ! -d "${work_dir}" ] && mkdir -p "${work_dir}" && chmod 755 "${work_dir}" && mkdir -p "${conf_dir}"
+    mkdir -p "${work_dir}" "${conf_dir}"
+    chmod 755 "${work_dir}"
 
     # 下载二进制
     curl -sLo "${work_dir}/qrencode" "https://$ARCH.ssss.nyc.mn/qrencode"
@@ -466,36 +467,6 @@ get_fixed_domain() {
 # 检查固定隧道是否已配置
 is_fixed_tunnel_configured() {
     [ -f "${work_dir}/tunnel.yml" ]
-}
-
-# 更新 url.txt 中的 VMess Argo 域名（接受参数，不依赖全局变量）
-update_vmess_domain() {
-    local new_domain="$1"
-    if [ -z "$new_domain" ]; then
-        red "域名为空，无法更新 VMess 节点\n"
-        return 1
-    fi
-    if [ ! -f "$client_dir" ]; then
-        red "url.txt 不存在，请先完成节点信息生成\n"
-        return 1
-    fi
-
-    local vmess_url encoded_vmess decoded_vmess updated_vmess encoded_updated new_vmess
-    vmess_url=$(grep -o 'vmess://[^ ]*' "$client_dir")
-    if [ -z "$vmess_url" ]; then
-        red "未找到 VMess 节点，无法更新\n"
-        return 1
-    fi
-    encoded_vmess="${vmess_url#vmess://}"
-    decoded_vmess=$(echo "$encoded_vmess" | base64 --decode 2>/dev/null)
-    updated_vmess=$(echo "$decoded_vmess" | jq \
-        --arg d "$new_domain" \
-        '.host = $d | .sni = $d | .fp = "chrome" | .allowInsecure = false')
-    encoded_updated=$(echo "$updated_vmess" | base64 | tr -d '\n')
-    new_vmess="vmess://${encoded_updated}"
-    sed -i "s|${vmess_url}|${new_vmess}|" "$client_dir"
-    green "VMess 节点已更新\n"
-    purple "$new_vmess\n"
 }
 
 # 获取节点信息并输出链接
