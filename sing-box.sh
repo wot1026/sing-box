@@ -95,6 +95,25 @@ allow_port() {
     done
 }
 
+# ── 防火墙删除旧规则 ──────────────────────────────
+remove_port() {
+    local has_ufw=0 has_iptables=0 has_ip6tables=0
+    command_exists ufw       && has_ufw=1
+    command_exists iptables  && has_iptables=1
+    command_exists ip6tables && has_ip6tables=1
+
+    for rule in "$@"; do
+        local port="${rule%/*}" proto="${rule#*/}"
+        [ $has_ufw -eq 1 ] && ufw delete allow "${port}/${proto}" >/dev/null 2>&1
+        if [ $has_iptables -eq 1 ]; then
+            iptables  -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+        fi
+        if [ $has_ip6tables -eq 1 ]; then
+            ip6tables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+        fi
+    done
+}
+
 # ── 节点名称 ──────────────────────────────────────
 get_flag() {
     local code
@@ -521,6 +540,8 @@ change_config() {
         2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
+            old_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "$inbounds_file")
+            remove_port "${old_port}/udp"
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="hysteria2") | .listen_port) = $p' \
                 "$inbounds_file" > "${inbounds_file}.tmp" \
@@ -532,6 +553,8 @@ change_config() {
         3)
             reading "\n请输入新的 VMess-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
+            old_port=$(jq -r '.inbounds[] | select(.type=="vmess") | .listen_port' "$inbounds_file")
+            remove_port "${old_port}/tcp"
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vmess") | .listen_port) = $p' \
                 "$inbounds_file" > "${inbounds_file}.tmp" \
@@ -858,7 +881,7 @@ case "$1" in
                 2)  uninstall_singbox;  need_pause=false ;;
                 3)  manage_singbox;     need_pause=false ;;
                 4)  manage_argo;        need_pause=true ;;
-                5)  get_info;        need_pause=true ;;
+                5)  get_info;           need_pause=true ;;
                 6)  change_config;      need_pause=true ;;
                 7)  cn_block_manage;    need_pause=true ;;
                 8)  upgrade_singbox;    need_pause=true ;;
