@@ -405,10 +405,12 @@ EOF
     else
         green "\nArgo 域名：${argodomain}\n"
         local vmess_json
+        local _port="${CFPORT:-443}"
+        [[ "$_port" =~ ^[0-9]+$ ]] || _port="443"
         vmess_json=$(jq -n \
             --arg  ps   "${node_prefix} argo" \
             --arg  add  "${CFIP}" \
-            --argjson port "${CFPORT}" \
+            --argjson port "$_port" \
             --arg  id   "${uuid}" \
             --arg  host "${argodomain}" \
             '{v:"2", ps:$ps, add:$add, port:$port,
@@ -494,7 +496,10 @@ cn_block_manage() {
             fi
             jq '
               del(.route.rules[] | select(.rule_set[]? == "geosite-cn")) |
-              del(.route.rules[] | select(.domain_regex? and .outbound == "direct")) |
+              del(.route.rules[] | select(
+                  .domain_regex? and .outbound == "direct" and
+                  (.domain_regex[] | test("googleapis"))
+              )) |
               del(.route.rule_set[] | select(.tag == "geosite-cn"))
             ' "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
@@ -636,8 +641,8 @@ configure_fixed_tunnel() {
         echo "$argo_auth" > "${work_dir}/tunnel.json"
         chmod 600 "${work_dir}/tunnel.json"
         local tunnel_id
-        tunnel_id=$(echo "$argo_auth" | jq -r '.TunnelID // empty' 2>/dev/null)
-        [ -z "$tunnel_id" ] && tunnel_id=$(cut -d'"' -f12 <<< "$argo_auth")
+        tunnel_id=$(echo "$argo_auth" | jq -r '(.TunnelID // .tunnelID // .tunnel_id) // empty' 2>/dev/null)
+[ -z "$tunnel_id" ] && { red "无法解析 TunnelID，请检查 JSON 格式"; return 1; }
         if [ -z "$tunnel_id" ]; then
             red "无法解析 TunnelID，请检查 JSON 格式"; return 1
         fi
@@ -670,7 +675,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
-    elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=_-]{120,250}$ ]]; then
+    elif [[ "$argo_auth" =~ ^[A-Za-z0-9._-]{100,500}$ ]]; then
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
