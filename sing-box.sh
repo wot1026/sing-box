@@ -72,12 +72,10 @@ allow_port() {
     if [ $has_iptables -eq 1 ]; then
         iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         iptables -C INPUT -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        # FIX 问题5: 删除 FORWARD/OUTPUT 全局策略修改，避免破坏 Docker/WireGuard 等
     fi
     if [ $has_ip6tables -eq 1 ]; then
         ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || ip6tables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         ip6tables -C INPUT -p icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        # FIX 问题5: 同上
     fi
 
     for rule in "$@"; do
@@ -93,7 +91,6 @@ allow_port() {
         fi
     done
 
-    # FIX 问题4: mkdir -p 确保目录存在再持久化
     if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
         mkdir -p /etc/iptables
         iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
@@ -122,7 +119,6 @@ remove_port() {
         fi
     done
 
-    # FIX 问题4: mkdir -p 确保目录存在再持久化
     if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
         mkdir -p /etc/iptables
         iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
@@ -151,7 +147,8 @@ get_flag() {
 get_node_name() { echo "$(get_flag) $(hostname)"; }
 
 # ── Hysteria2 指纹 ────────────────────────────────
-# FIX 问题3: 改为 SPKI 指纹（公钥 SHA256），与 sing-box/Mihomo 客户端兼容
+# SPKI 指纹（公钥 SHA256），在 URI query 参数里去掉 = padding
+# 避免 = 被 URL parser 当成参数分隔符，客户端均兼容无 padding 的 base64
 get_hy2_fingerprint() {
     openssl x509 -in "${work_dir}/cert.pem" -pubkey -noout 2>/dev/null \
         | openssl pkey -pubin -outform DER 2>/dev/null \
@@ -206,7 +203,6 @@ download_singbox() {
 }
 
 # 下载并校验 cloudflared（官方 GitHub Release）
-# FIX 问题1: 改用 checksums.txt grep，而非单独的 .sha256sum 文件（后者在新版本不存在）
 download_cloudflared() {
     local arch="$1" dest="$2"
     local bin_name="cloudflared-linux-${arch}"
@@ -240,23 +236,22 @@ download_cloudflared() {
 
 # ── FIX #8: 查找未被占用的 UDP 端口 ──────────────
 pick_free_udp_port() {
-    local port
+    local port attempts=0
     port=$(shuf -i 10000-65000 -n 1)
     while ss -ulnH | awk '{print $5}' | grep -q ":${port}$"; do
         port=$(shuf -i 10000-65000 -n 1)
+        (( attempts++ > 100 )) && { red "无法找到空闲 UDP 端口"; return 1; }
     done
     echo "$port"
 }
 
 # ── 安装核心 ──────────────────────────────────────
-# FIX #4-new: 接收版本号参数；检查 ARGO_PORT 占用
 install_singbox() {
     clear
     purple "正在安装 sing-box，请稍候…"
 
-    local sb_ver="${1:-$SB_VERSION}"   # FIX #5-new: 接收外部传入版本，回退到硬编码
+    local sb_ver="${1:-$SB_VERSION}"
 
-    # FIX #4-new: 检查 ARGO_PORT 是否被占用
     if ss -tlnH | awk '{print $5}' | grep -q ":${ARGO_PORT}$"; then
         red "端口 ${ARGO_PORT} 已被占用，请修改 ARGO_PORT 后重试"
         exit 1
@@ -273,21 +268,17 @@ install_singbox() {
     mkdir -p "${work_dir}" "${conf_dir}"
     chmod 700 "${work_dir}"
 
-    # FIX #5-new: 使用传入的版本号，而非硬编码 $SB_VERSION
     download_singbox "$arch" "$sb_ver" "${work_dir}/sing-box" \
         || exit 1
     download_cloudflared "$arch" "${work_dir}/argo" \
         || exit 1
 
-    # qrencode 直接用系统包，无需手动下载
     apt-get install -y qrencode 2>/dev/null || yellow "qrencode 安装失败，二维码功能不可用"
 
-    # FIX #8: 使用空闲端口检测
     local hy2_port uuid
     hy2_port=$(pick_free_udp_port)
     uuid=$(cat /proc/sys/kernel/random/uuid)
 
-    # FIX #4: VMess 只监听本地；Argo 与本机通信用 127.0.0.1，无需对外开放 ARGO_PORT
     allow_port "${hy2_port}/udp"
 
     yellow "正在生成 TLS 证书..."
@@ -329,7 +320,6 @@ EOF
 }
 EOF
 
-    # FIX #4: listen 改为 127.0.0.1，VMess 不直接暴露公网
     cat > "${conf_dir}/inbounds.json" << EOF
 {
   "inbounds": [
@@ -423,7 +413,6 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
 
-    # argo 服务初始为占位，configure_fixed_tunnel 时覆盖
     cat > /etc/systemd/system/argo.service << 'EOF'
 [Unit]
 Description=Cloudflare Tunnel
@@ -506,7 +495,6 @@ get_info() {
     hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${conf_dir}/inbounds.json")
     uuid=$(jq -r '.inbounds[] | select(.type=="vmess") | .users[0].uuid' "${conf_dir}/inbounds.json")
 
-    # FIX #7: 校验 fingerprint，证书异常时提前报错
     fingerprint=$(get_hy2_fingerprint)
     if [ -z "$fingerprint" ]; then
         red "证书读取失败，无法生成节点信息（请检查 ${work_dir}/cert.pem 是否存在）"
@@ -594,7 +582,14 @@ cn_block_manage() {
             fi
             local tmp_file
             tmp_file=$(mktemp)
+            # FIX 问题2: 先 del 清理残留再 add，保证幂等
             jq '
+              del(.route.rules[] | select(.rule_set[]? == "geosite-cn")) |
+              del(.route.rules[] | select(
+                  .domain_regex? and .outbound == "direct" and
+                  (.domain_regex[] | test("googleapis"))
+              )) |
+              del(.route.rule_set[] | select(.tag == "geosite-cn")) |
               .route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary",
                 "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
                 "download_detour":"direct"}] |
@@ -657,7 +652,6 @@ change_config() {
         1)
             reading "\n请输入新的 UUID（回车随机生成）: " new_uuid
             [ -z "$new_uuid" ] && new_uuid=$(cat /proc/sys/kernel/random/uuid)
-            # FIX #9: 校验 UUID 格式
             if [[ -n "$new_uuid" ]] && \
                ! [[ "$new_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
                 red "UUID 格式不合法"; sleep 1; return
@@ -675,10 +669,8 @@ change_config() {
         2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
             if [ -z "$new_port" ]; then
-                # FIX #8: 随机端口同样检查占用
                 new_port=$(pick_free_udp_port)
             else
-                # FIX #9: 校验端口范围
                 if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
                     red "端口无效（1-65535）"; sleep 1; return
                 fi
@@ -701,25 +693,24 @@ change_config() {
         3)
             reading "\n请输入新的 VMess-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
-            # FIX #9: 校验端口范围
             if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
                 red "端口无效（1-65535）"; sleep 1; return
             fi
+            # FIX 问题3: 补充 TCP 占用检查（VMess 监听 127.0.0.1，冲突同样导致启动失败）
+            if ss -tlnH | awk '{print $5}' | grep -q ":${new_port}$"; then
+                red "端口 ${new_port} 已被占用，请换一个"; sleep 1; return
+            fi
             old_port=$(jq -r '.inbounds[] | select(.type=="vmess") | .listen_port' "$inbounds_file")
-            remove_port "${old_port}/tcp"
             local tmp_file
             tmp_file=$(mktemp)
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vmess") | .listen_port) = $p' \
                 "$inbounds_file" > "$tmp_file" \
                 && mv "$tmp_file" "$inbounds_file"
-            # FIX #4: VMess 监听 127.0.0.1，不需要对外放行端口
-            # VMess-Argo 端口只需更新 tunnel.yml，不调用 allow_port
             if [ -f "${work_dir}/tunnel.yml" ]; then
                 sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
                     "${work_dir}/tunnel.yml"
             fi
-            # 提示 token 模式需手动同步
             if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
                 yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
             fi
@@ -756,7 +747,6 @@ change_config() {
 }
 
 # ── 升级 sing-box ─────────────────────────────────
-# FIX #10: 查询最新版本，与当前版本对比，用官方源下载
 upgrade_singbox() {
     check_singbox &>/dev/null
     [ $? -eq 2 ] && { yellow "sing-box 尚未安装！"; sleep 1; return; }
@@ -769,13 +759,11 @@ upgrade_singbox() {
         *) red "不支持的架构: ${arch_raw}"; return 1 ;;
     esac
 
-    # 查询当前版本
     local current_ver
     current_ver=$("${work_dir}/sing-box" version 2>/dev/null \
         | grep -oP '\d+\.\d+\.\d+' | head -1)
     yellow "当前版本: ${current_ver:-未知}"
 
-    # 查询 GitHub 最新版本
     yellow "正在查询最新版本…"
     local latest_ver
     latest_ver=$(get_latest_sb_version)
@@ -799,12 +787,24 @@ upgrade_singbox() {
     download_singbox "$arch" "$latest_ver" "$tmp_dest" || return 1
 
     stop_singbox
-    mv "$tmp_dest" "${work_dir}/sing-box"
-    chmod +x "${work_dir}/sing-box"
-    chown root:root "${work_dir}/sing-box"
-    start_singbox
-    green "\nsing-box 已升级至 v${latest_ver}\n"
-    "${work_dir}/sing-box" version
+
+    # FIX 问题4: 备份旧二进制，下载或启动失败时自动回滚
+    cp "${work_dir}/sing-box" "${work_dir}/sing-box.bak"
+
+    if mv "$tmp_dest" "${work_dir}/sing-box" && \
+       chmod +x "${work_dir}/sing-box" && \
+       chown root:root "${work_dir}/sing-box" && \
+       "${work_dir}/sing-box" version &>/dev/null; then
+        rm -f "${work_dir}/sing-box.bak"
+        start_singbox
+        green "\nsing-box 已升级至 v${latest_ver}\n"
+        "${work_dir}/sing-box" version
+    else
+        red "升级失败，正在回滚…"
+        mv "${work_dir}/sing-box.bak" "${work_dir}/sing-box"
+        start_singbox
+        red "已回滚到旧版本，请检查网络或稍后重试\n"
+    fi
 }
 
 # ── 配置固定 Argo 隧道 ────────────────────────────
@@ -816,7 +816,6 @@ configure_fixed_tunnel() {
     reading "\n请输入 Argo 域名: " argo_domain
     [ -z "$argo_domain" ] && { red "域名不能为空"; return 1; }
 
-    # FIX #7: 校验域名格式，防止特殊字符破坏 YAML 结构
     if ! [[ "$argo_domain" =~ ^[A-Za-z0-9._-]+\.[A-Za-z]{2,}$ ]]; then
         red "域名格式不合法"; return 1
     fi
@@ -831,7 +830,6 @@ configure_fixed_tunnel() {
         tunnel_id=$(echo "$argo_auth" \
             | jq -r '(.TunnelID // .tunnelID // .tunnel_id) // empty' 2>/dev/null)
 
-        # FIX #5: 删除死代码，保留单次判断
         [ -z "$tunnel_id" ] && { red "无法解析 TunnelID，请检查 JSON 格式"; return 1; }
 
         cat > "${work_dir}/tunnel.yml" << EOF
@@ -847,7 +845,6 @@ ingress:
   - service: http_status:404
 EOF
 
-        # FIX #2: JSON 模式用 tunnel.yml，不暴露 token
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -866,7 +863,6 @@ WantedBy=multi-user.target
 EOF
 
     elif [[ "$argo_auth" =~ ^[A-Za-z0-9._-]{100,500}$ ]]; then
-        # FIX #2: Token 写入权限 600 的文件，通过 --token-file 传入，不拼入 cmdline
         printf '%s' "$argo_auth" > "${work_dir}/argo.token"
         chmod 600 "${work_dir}/argo.token"
 
@@ -924,7 +920,6 @@ manage_argo() {
 }
 
 # ── sing-box 管理菜单 ─────────────────────────────
-# FIX #8: 改为 while 循环，避免无效输入导致无限递归
 manage_singbox() {
     local sb_status
     while true; do
@@ -1024,7 +1019,6 @@ menu() {
 do_install() {
     install_packages jq openssl curl
 
-    # FIX #5-new: 查询最新版本，失败则回退硬编码
     yellow "正在查询 sing-box 最新版本…"
     local install_ver
     install_ver=$(get_latest_sb_version)
@@ -1035,7 +1029,7 @@ do_install() {
         green "将安装最新版本 v${install_ver}"
     fi
 
-    install_singbox "$install_ver"   # FIX #5-new: 传入版本号
+    install_singbox "$install_ver"
     setup_services
     sleep 2
     create_shortcut
@@ -1100,7 +1094,6 @@ case "$1" in
                 9)  update_script;      need_pause=false ;;
                 10)
                     clear
-                    # FIX #3: 确保使用 https://
                     bash <(curl -fsSL https://ssh_tool.eooce.com)
                     need_pause=false
                     ;;
