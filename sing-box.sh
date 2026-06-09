@@ -1,8 +1,10 @@
+#!/bin/bash
+
 # =========================
 # 自用 sing-box 安装脚本
 # 协议: vmess-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.8
+# 最后更新时间: 2026.6.9
 # =========================
 
 export LANG=en_US.UTF-8
@@ -22,8 +24,8 @@ work_dir="/etc/sing-box"
 conf_dir="${work_dir}/conf"
 client_dir="${work_dir}/url.txt"
 SCRIPT_URL="https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/sing-box.sh"
+ARGO_PORT="8001"
 
-export ARGO_PORT=${ARGO_PORT:-'8001'}
 export CFIP=${CFIP:-'cf.877774.xyz'}
 export CFPORT=${CFPORT:-'443'}
 
@@ -93,25 +95,6 @@ allow_port() {
     done
 }
 
-# ── 防火墙删除旧规则 ──────────────────────────────
-remove_port() {
-    local has_ufw=0 has_iptables=0 has_ip6tables=0
-    command_exists ufw       && has_ufw=1
-    command_exists iptables  && has_iptables=1
-    command_exists ip6tables && has_ip6tables=1
-
-    for rule in "$@"; do
-        local port="${rule%/*}" proto="${rule#*/}"
-        [ $has_ufw -eq 1 ] && ufw delete allow "${port}/${proto}" >/dev/null 2>&1
-        if [ $has_iptables -eq 1 ]; then
-            iptables  -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
-        fi
-        if [ $has_ip6tables -eq 1 ]; then
-            ip6tables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
-        fi
-    done
-}
-
 # ── 节点名称 ──────────────────────────────────────
 get_flag() {
     local code
@@ -130,14 +113,11 @@ get_flag() {
 
 get_node_name() { echo "$(get_flag) $(hostname)"; }
 
-# ── Hysteria2 指纹（base64 格式）─────────────────
-# 修复第10条：移除 python3 依赖，改用 xxd + base64
+# ── Hysteria2 指纹（纯 openssl，无额外依赖）────────
 get_hy2_fingerprint() {
-    local hex
-    hex=$(openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" 2>/dev/null \
-        | cut -d'=' -f2 | tr -d ':')
-    [ -z "$hex" ] && { echo ""; return; }
-    echo "$hex" | xxd -r -p | base64 | tr -d '=' | tr -d '\n'
+    openssl x509 -in "${work_dir}/cert.pem" -outform DER 2>/dev/null \
+        | openssl dgst -sha256 -binary 2>/dev/null \
+        | base64 | tr '+/' '-_' | tr -d '=' | tr -d '\n'
 }
 
 # ── 安装核心 ──────────────────────────────────────
@@ -397,31 +377,34 @@ get_info() {
     local argodomain=""
     is_fixed_tunnel_configured && argodomain=$(get_fixed_domain)
 
+    # argodomain 为空时只写 hy2 节点，跳过 vmess
     if [ -z "$argodomain" ]; then
         yellow "未检测到固定隧道域名，VMess 节点暂不可用，请先配置 Argo 固定隧道\n"
+        cat > "${client_dir}" << EOF
+hysteria2://${uuid}@${server_ip}:${hy2_port}/?sni=bing.com&insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+EOF
     else
         green "\nArgo 域名：${argodomain}\n"
-    fi
+        local vmess_json
+        vmess_json=$(jq -n \
+            --arg  ps   "${node_prefix} argo" \
+            --arg  add  "${CFIP}" \
+            --argjson port "${CFPORT}" \
+            --arg  id   "${uuid}" \
+            --arg  host "${argodomain}" \
+            '{v:"2", ps:$ps, add:$add, port:$port,
+              id:$id, aid:"0", scy:"none",
+              net:"ws", type:"none",
+              host:$host, path:"/vmess-argo?ed=2560",
+              tls:"tls", sni:$host,
+              alpn:"", fp:"chrome", allowInsecure:false}')
 
-    local vmess_json
-    vmess_json=$(jq -n \
-        --arg ps   "${node_prefix} argo" \
-        --arg add  "${CFIP}" \
-        --arg port "${CFPORT}" \
-        --arg id   "${uuid}" \
-        --arg host "${argodomain}" \
-        '{v:"2", ps:$ps, add:$add, port:$port,
-          id:$id, aid:"0", scy:"none",
-          net:"ws", type:"none",
-          host:$host, path:"/vmess-argo?ed=2560",
-          tls:"tls", sni:$host,
-          alpn:"", fp:"chrome", allowInsecure:false}')
-
-    cat > "${client_dir}" << EOF
+        cat > "${client_dir}" << EOF
 vmess://$(echo "$vmess_json" | base64 | tr -d '\n')
 
-hysteria2://${uuid}@${server_ip}:${hy2_port}/?sni=bing.com&insecure=1&pinSHA256=${fingerprint}&alpn=h3&obfs=none#${node_prefix} hy2
+hysteria2://${uuid}@${server_ip}:${hy2_port}/?sni=bing.com&insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
+    fi
 
     echo ""
     while IFS= read -r line; do
@@ -504,7 +487,6 @@ cn_block_manage() {
     esac
 }
 
-
 # ── 修改节点配置 ──────────────────────────────────
 change_config() {
     check_singbox &>/dev/null
@@ -539,10 +521,6 @@ change_config() {
         2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
-            # 修复第9条：先删除旧端口防火墙规则
-            old_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "$inbounds_file")
-            remove_port "${old_port}/udp"
-            # 写入新配置
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="hysteria2") | .listen_port) = $p' \
                 "$inbounds_file" > "${inbounds_file}.tmp" \
@@ -554,10 +532,6 @@ change_config() {
         3)
             reading "\n请输入新的 VMess-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
-            # 修复第9条：先删除旧端口防火墙规则
-            old_port=$(jq -r '.inbounds[] | select(.type=="vmess") | .listen_port' "$inbounds_file")
-            remove_port "${old_port}/tcp"
-            # 写入新配置
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vmess") | .listen_port) = $p' \
                 "$inbounds_file" > "${inbounds_file}.tmp" \
@@ -623,7 +597,6 @@ upgrade_singbox() {
     "${work_dir}/sing-box" version
 }
 
-
 # ── 配置固定 Argo 隧道 ────────────────────────────
 configure_fixed_tunnel() {
     clear
@@ -674,7 +647,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
-    elif [[ "$argo_auth" =~ ^[A-Za-z0-9=]{120,250}$ ]]; then
+    elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=_-]{120,250}$ ]]; then
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
@@ -809,14 +782,13 @@ menu() {
     green  "3. sing-box 管理"
     green  "4. Argo 隧道管理"
     echo   "==============="
-    green  "5. 刷新节点信息"
+    green  "5. 查看节点信息"
     green  "6. 修改节点配置"
     echo   "==============="
     green  "7. 大陆域名拦截"
     echo   "==============="
-    green  "8. 更新脚本"
-    echo   "==============="
-    green  "9. 升级 sing-box"
+    green  "8. 升级 sing-box"
+    green  "9. 更新脚本"
     echo   "==============="
     purple "10. SSH 综合工具箱"
     echo   "==============="
@@ -871,7 +843,7 @@ case "$1" in
     "")
         while true; do
             menu
-            reading "请输入选择(0-9): " choice
+            reading "请输入选择(0-10): " choice
             echo ""
             need_pause=true
             case "$choice" in
@@ -883,21 +855,21 @@ case "$1" in
                         do_install
                     fi
                     ;;
-                2) uninstall_singbox;  need_pause=false ;;
-                3) manage_singbox;     need_pause=false ;;
-                4) manage_argo;        need_pause=true ;;
-                5) get_info;           need_pause=true ;;
-                6) change_config;      need_pause=true ;;
-                7) cn_block_manage;    need_pause=true ;;
-                8) update_script;      need_pause=false ;;
-                9)  upgrade_singbox;   need_pause=true ;;
+                2)  uninstall_singbox;  need_pause=false ;;
+                3)  manage_singbox;     need_pause=false ;;
+                4)  manage_argo;        need_pause=true ;;
+                5)  check_nodes;        need_pause=true ;;
+                6)  change_config;      need_pause=true ;;
+                7)  cn_block_manage;    need_pause=true ;;
+                8)  upgrade_singbox;    need_pause=true ;;
+                9)  update_script;      need_pause=false ;;
                 10)
                     clear
                     bash <(curl -Ls ssh_tool.eooce.com)
                     need_pause=false
                     ;;
                 0) exit 0 ;;
-                *) red "无效选项，请输入 0-9" ;;
+                *) red "无效选项，请输入 0-10" ;;
             esac
             [ "$need_pause" = true ] && read -n1 -s -r -p $'\033[1;91m按任意键返回...\033[0m'
             echo ""
