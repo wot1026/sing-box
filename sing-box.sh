@@ -61,7 +61,6 @@ install_packages() {
 }
 
 # ── 防火墙放行 ────────────────────────────────────
-# FIX #6: 新增 iptables-save 持久化
 allow_port() {
     local has_ufw=0 has_iptables=0 has_ip6tables=0
     command_exists ufw       && has_ufw=1
@@ -73,14 +72,12 @@ allow_port() {
     if [ $has_iptables -eq 1 ]; then
         iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         iptables -C INPUT -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        iptables -P FORWARD DROP 2>/dev/null || true
-        iptables -P OUTPUT ACCEPT 2>/dev/null || true
+        # FIX 问题5: 删除 FORWARD/OUTPUT 全局策略修改，避免破坏 Docker/WireGuard 等
     fi
     if [ $has_ip6tables -eq 1 ]; then
         ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || ip6tables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         ip6tables -C INPUT -p icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        ip6tables -P FORWARD DROP 2>/dev/null || true
-        ip6tables -P OUTPUT ACCEPT 2>/dev/null || true
+        # FIX 问题5: 同上
     fi
 
     for rule in "$@"; do
@@ -96,11 +93,13 @@ allow_port() {
         fi
     done
 
-    # FIX #6: 持久化 iptables 规则
+    # FIX 问题4: mkdir -p 确保目录存在再持久化
     if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
+        mkdir -p /etc/iptables
         iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
     fi
     if [ $has_ip6tables -eq 1 ] && command_exists ip6tables-save; then
+        mkdir -p /etc/iptables
         ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
     fi
 }
@@ -123,11 +122,13 @@ remove_port() {
         fi
     done
 
-    # FIX #6: 持久化 iptables 规则
+    # FIX 问题4: mkdir -p 确保目录存在再持久化
     if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
+        mkdir -p /etc/iptables
         iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
     fi
     if [ $has_ip6tables -eq 1 ] && command_exists ip6tables-save; then
+        mkdir -p /etc/iptables
         ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
     fi
 }
@@ -149,9 +150,11 @@ get_flag() {
 
 get_node_name() { echo "$(get_flag) $(hostname)"; }
 
-# ── Hysteria2 指纹（纯 openssl，无额外依赖）────────
+# ── Hysteria2 指纹 ────────────────────────────────
+# FIX 问题3: 改为 SPKI 指纹（公钥 SHA256），与 sing-box/Mihomo 客户端兼容
 get_hy2_fingerprint() {
-    openssl x509 -in "${work_dir}/cert.pem" -outform DER 2>/dev/null \
+    openssl x509 -in "${work_dir}/cert.pem" -pubkey -noout 2>/dev/null \
+        | openssl pkey -pubin -outform DER 2>/dev/null \
         | openssl dgst -sha256 -binary 2>/dev/null \
         | base64 | tr -d '=' | tr -d '\n'
 }
@@ -203,6 +206,7 @@ download_singbox() {
 }
 
 # 下载并校验 cloudflared（官方 GitHub Release）
+# FIX 问题1: 改用 checksums.txt grep，而非单独的 .sha256sum 文件（后者在新版本不存在）
 download_cloudflared() {
     local arch="$1" dest="$2"
     local bin_name="cloudflared-linux-${arch}"
@@ -216,8 +220,8 @@ download_cloudflared() {
 
     yellow "正在校验 SHA256..."
     local sha256_remote sha256_local
-    sha256_remote=$(curl -fsSL "${base_url}/${bin_name}.sha256sum" 2>/dev/null \
-        | awk '{print $1}')
+    sha256_remote=$(curl -fsSL "${base_url}/checksums.txt" 2>/dev/null \
+        | grep "${bin_name}$" | awk '{print $1}')
     if [ -n "$sha256_remote" ]; then
         sha256_local=$(sha256sum "$tmp_file" | awk '{print $1}')
         if [ "$sha256_local" != "$sha256_remote" ]; then
@@ -830,7 +834,7 @@ ingress:
   - service: http_status:404
 EOF
 
-        # FIX #2: Token 写文件，不拼入 ExecStart cmdline
+        # FIX #2: JSON 模式用 tunnel.yml，不暴露 token
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -849,7 +853,7 @@ WantedBy=multi-user.target
 EOF
 
     elif [[ "$argo_auth" =~ ^[A-Za-z0-9._-]{100,500}$ ]]; then
-        # FIX #2: Token 写入权限 600 的文件，通过 --token-file 传入
+        # FIX #2: Token 写入权限 600 的文件，通过 --token-file 传入，不拼入 cmdline
         printf '%s' "$argo_auth" > "${work_dir}/argo.token"
         chmod 600 "${work_dir}/argo.token"
 
