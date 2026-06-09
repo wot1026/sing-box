@@ -163,7 +163,7 @@ get_latest_sb_version() {
         | jq -r '.tag_name // empty' | tr -d 'v'
 }
 
-# 下载并校验 sing-box（官方 GitHub Release）
+# 下载 sing-box（官方 GitHub Release）
 download_singbox() {
     local arch="$1" version="$2" dest="$3"
     local base_url="https://github.com/SagerNet/sing-box/releases/download/v${version}"
@@ -177,21 +177,6 @@ download_singbox() {
     curl -fsSLo "$tmp_tar" "${base_url}/${tarball}" \
         || { red "sing-box 下载失败"; rm -f "$tmp_tar"; rm -rf "$tmp_dir"; return 1; }
 
-    yellow "正在校验 SHA256..."
-    local sha256_remote sha256_local
-    sha256_remote=$(curl -fsSL "${base_url}/${tarball}.sha256sum" 2>/dev/null \
-        | awk '{print $1}')
-    if [ -n "$sha256_remote" ]; then
-        sha256_local=$(sha256sum "$tmp_tar" | awk '{print $1}')
-        if [ "$sha256_local" != "$sha256_remote" ]; then
-            red "SHA256 校验失败！文件可能被篡改，已中止"
-            rm -f "$tmp_tar"; rm -rf "$tmp_dir"; return 1
-        fi
-        green "SHA256 校验通过"
-    else
-        yellow "警告：无法获取官方 SHA256，跳过校验"
-    fi
-
     tar -xzf "$tmp_tar" -C "$tmp_dir" \
         || { red "解压失败"; rm -f "$tmp_tar"; rm -rf "$tmp_dir"; return 1; }
     mv "${tmp_dir}/sing-box-${version}-linux-${arch}/sing-box" "$dest" \
@@ -202,7 +187,7 @@ download_singbox() {
     chown root:root "$dest"
 }
 
-# 下载并校验 cloudflared（官方 GitHub Release）
+# 下载 cloudflared（官方 GitHub Release）
 download_cloudflared() {
     local arch="$1" dest="$2"
     local bin_name="cloudflared-linux-${arch}"
@@ -213,21 +198,6 @@ download_cloudflared() {
     yellow "正在下载 cloudflared..."
     curl -fsSLo "$tmp_file" "${base_url}/${bin_name}" \
         || { red "cloudflared 下载失败"; rm -f "$tmp_file"; return 1; }
-
-    yellow "正在校验 SHA256..."
-    local sha256_remote sha256_local
-    sha256_remote=$(curl -fsSL "${base_url}/checksums.txt" 2>/dev/null \
-        | grep "${bin_name}$" | awk '{print $1}')
-    if [ -n "$sha256_remote" ]; then
-        sha256_local=$(sha256sum "$tmp_file" | awk '{print $1}')
-        if [ "$sha256_local" != "$sha256_remote" ]; then
-            red "SHA256 校验失败！文件可能被篡改，已中止"
-            rm -f "$tmp_file"; return 1
-        fi
-        green "SHA256 校验通过"
-    else
-        yellow "警告：无法获取官方 SHA256，跳过校验"
-    fi
 
     mv "$tmp_file" "$dest"
     chmod +x "$dest"
