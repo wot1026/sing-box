@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # =========================
 # 自用 sing-box 安装脚本
 # 协议: vmess-argo(固定隧道) + hysteria2
@@ -236,6 +234,16 @@ download_cloudflared() {
     chown root:root "$dest"
 }
 
+# ── FIX #8: 查找未被占用的 UDP 端口 ──────────────
+pick_free_udp_port() {
+    local port
+    port=$(shuf -i 10000-65000 -n 1)
+    while ss -ulnH | awk '{print $5}' | grep -q ":${port}$"; do
+        port=$(shuf -i 10000-65000 -n 1)
+    done
+    echo "$port"
+}
+
 # ── 安装核心 ──────────────────────────────────────
 install_singbox() {
     clear
@@ -261,8 +269,9 @@ install_singbox() {
     # qrencode 直接用系统包，无需手动下载
     apt-get install -y qrencode 2>/dev/null || yellow "qrencode 安装失败，二维码功能不可用"
 
+    # FIX #8: 使用空闲端口检测
     local hy2_port uuid
-    hy2_port=$(shuf -i 10000-65000 -n 1)
+    hy2_port=$(pick_free_udp_port)
     uuid=$(cat /proc/sys/kernel/random/uuid)
 
     # FIX #4: VMess 只监听本地；Argo 与本机通信用 127.0.0.1，无需对外开放 ARGO_PORT
@@ -483,7 +492,13 @@ get_info() {
     local hy2_port uuid fingerprint
     hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${conf_dir}/inbounds.json")
     uuid=$(jq -r '.inbounds[] | select(.type=="vmess") | .users[0].uuid' "${conf_dir}/inbounds.json")
+
+    # FIX #7: 校验 fingerprint，证书异常时提前报错
     fingerprint=$(get_hy2_fingerprint)
+    if [ -z "$fingerprint" ]; then
+        red "证书读取失败，无法生成节点信息（请检查 ${work_dir}/cert.pem 是否存在）"
+        return 1
+    fi
 
     local argodomain=""
     is_fixed_tunnel_configured && argodomain=$(get_fixed_domain)
@@ -646,10 +661,17 @@ change_config() {
             ;;
         2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
-            [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
-            # FIX #9: 校验端口范围
-            if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
-                red "端口无效（1-65535）"; sleep 1; return
+            if [ -z "$new_port" ]; then
+                # FIX #8: 随机端口同样检查占用
+                new_port=$(pick_free_udp_port)
+            else
+                # FIX #9: 校验端口范围
+                if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
+                    red "端口无效（1-65535）"; sleep 1; return
+                fi
+                if ss -ulnH | awk '{print $5}' | grep -q ":${new_port}$"; then
+                    red "端口 ${new_port} 已被占用，请换一个"; sleep 1; return
+                fi
             fi
             old_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "$inbounds_file")
             remove_port "${old_port}/udp"
