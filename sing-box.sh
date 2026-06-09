@@ -136,7 +136,7 @@ get_node_name() { echo "$(get_flag) $(hostname)"; }
 get_hy2_fingerprint() {
     openssl x509 -in "${work_dir}/cert.pem" -outform DER 2>/dev/null \
         | openssl dgst -sha256 -binary 2>/dev/null \
-        | base64 | tr '+/' '-_' | tr -d '=' | tr -d '\n'
+        | base64 | tr -d '=' | tr -d '\n'
 }
 
 # ── 安装核心 ──────────────────────────────────────
