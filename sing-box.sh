@@ -26,6 +26,9 @@ client_dir="${work_dir}/url.txt"
 SCRIPT_URL="https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/sing-box.sh"
 ARGO_PORT="8001"
 
+# FIX #10: 版本号统一在顶部维护，install 和 upgrade 共用
+SB_VERSION="1.13.13"
+
 export CFIP=${CFIP:-'cf.877774.xyz'}
 export CFPORT=${CFPORT:-'443'}
 
@@ -39,7 +42,7 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 check_service() {
     local name="$1" binary="$2"
     [[ ! -f "$binary" ]] && { red "not installed"; return 2; }
-    if systemctl is-active "$name" 2>/dev/null | grep -q "^active$"; then
+    if systemctl is-active "$name" &>/dev/null; then
         green "running"; return 0
     else
         yellow "not running"; return 1
@@ -51,15 +54,16 @@ check_argo()    { check_service "argo"     "${work_dir}/argo"; }
 
 # ── 包安装 ────────────────────────────────────────
 install_packages() {
-    apt update -y
+    apt-get update -y
     for pkg in "$@"; do
-        command_exists "$pkg" && { green "${pkg} 已安装，跳过"; continue; }
-        yellow "正在安装 ${pkg}..."
-        apt install -y "$pkg" || { red "${pkg} 安装失败"; return 1; }
+        command_exists "$pkg" && { yellow "${pkg} 已安装，跳过"; continue; }
+        yellow "正在安装 ${pkg}…"
+        apt-get install -y "$pkg" || { red "${pkg} 安装失败"; return 1; }
     done
 }
 
 # ── 防火墙放行 ────────────────────────────────────
+# FIX #6: 新增 iptables-save 持久化
 allow_port() {
     local has_ufw=0 has_iptables=0 has_ip6tables=0
     command_exists ufw       && has_ufw=1
@@ -93,6 +97,14 @@ allow_port() {
                 || ip6tables -A INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
         fi
     done
+
+    # FIX #6: 持久化 iptables 规则
+    if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    fi
+    if [ $has_ip6tables -eq 1 ] && command_exists ip6tables-save; then
+        ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+    fi
 }
 
 # ── 防火墙删除旧规则 ──────────────────────────────
@@ -112,13 +124,20 @@ remove_port() {
             ip6tables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
         fi
     done
+
+    # FIX #6: 持久化 iptables 规则
+    if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    fi
+    if [ $has_ip6tables -eq 1 ] && command_exists ip6tables-save; then
+        ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+    fi
 }
 
 # ── 节点名称 ──────────────────────────────────────
 get_flag() {
     local code
-    code=$(curl -sm3 -H "User-Agent: Mozilla/5.0" "https://api.ip.sb/geoip" \
-           | jq -r '.country_code // empty' 2>/dev/null)
+    code=$(curl -sm3 -H "User-Agent: Mozilla/5.0" "https://api.ip.sb/geoip" | jq -r '.country_code // empty' 2>/dev/null)
     [ -z "$code" ] && code=$(curl -sm3 "https://ipapi.co/country_code" 2>/dev/null)
     case "$code" in
         US) echo "🇺🇸" ;; KR) echo "🇰🇷" ;; JP) echo "🇯🇵" ;;
@@ -139,10 +158,88 @@ get_hy2_fingerprint() {
         | base64 | tr -d '=' | tr -d '\n'
 }
 
+# ── FIX #1/#10: 官方源下载 + SHA256 校验 ─────────
+# 从 GitHub 查询 sing-box 最新版本号
+get_latest_sb_version() {
+    curl -fsSL "https://api.github.com/repos/SagerNet/sing-box/releases/latest" \
+        | jq -r '.tag_name // empty' | tr -d 'v'
+}
+
+# 下载并校验 sing-box（官方 GitHub Release）
+download_singbox() {
+    local arch="$1" version="$2" dest="$3"
+    local base_url="https://github.com/SagerNet/sing-box/releases/download/v${version}"
+    local tarball="sing-box-${version}-linux-${arch}.tar.gz"
+    local tmp_tar
+    tmp_tar=$(mktemp)
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+
+    yellow "正在下载 sing-box v${version}..."
+    curl -fsSLo "$tmp_tar" "${base_url}/${tarball}" \
+        || { red "sing-box 下载失败"; rm -f "$tmp_tar"; rm -rf "$tmp_dir"; return 1; }
+
+    yellow "正在校验 SHA256..."
+    local sha256_remote sha256_local
+    sha256_remote=$(curl -fsSL "${base_url}/${tarball}.sha256sum" 2>/dev/null \
+        | awk '{print $1}')
+    if [ -n "$sha256_remote" ]; then
+        sha256_local=$(sha256sum "$tmp_tar" | awk '{print $1}')
+        if [ "$sha256_local" != "$sha256_remote" ]; then
+            red "SHA256 校验失败！文件可能被篡改，已中止"
+            rm -f "$tmp_tar"; rm -rf "$tmp_dir"; return 1
+        fi
+        green "SHA256 校验通过"
+    else
+        yellow "警告：无法获取官方 SHA256，跳过校验"
+    fi
+
+    tar -xzf "$tmp_tar" -C "$tmp_dir" \
+        || { red "解压失败"; rm -f "$tmp_tar"; rm -rf "$tmp_dir"; return 1; }
+    mv "${tmp_dir}/sing-box-${version}-linux-${arch}/sing-box" "$dest" \
+        || { red "移动文件失败"; rm -f "$tmp_tar"; rm -rf "$tmp_dir"; return 1; }
+
+    rm -f "$tmp_tar"; rm -rf "$tmp_dir"
+    chmod +x "$dest"
+    chown root:root "$dest"
+}
+
+# 下载并校验 cloudflared（官方 GitHub Release）
+download_cloudflared() {
+    local arch="$1" dest="$2"
+    local bin_name="cloudflared-linux-${arch}"
+    local base_url="https://github.com/cloudflare/cloudflared/releases/latest/download"
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    yellow "正在下载 cloudflared..."
+    curl -fsSLo "$tmp_file" "${base_url}/${bin_name}" \
+        || { red "cloudflared 下载失败"; rm -f "$tmp_file"; return 1; }
+
+    yellow "正在校验 SHA256..."
+    local sha256_remote sha256_local
+    sha256_remote=$(curl -fsSL "${base_url}/${bin_name}.sha256sum" 2>/dev/null \
+        | awk '{print $1}')
+    if [ -n "$sha256_remote" ]; then
+        sha256_local=$(sha256sum "$tmp_file" | awk '{print $1}')
+        if [ "$sha256_local" != "$sha256_remote" ]; then
+            red "SHA256 校验失败！文件可能被篡改，已中止"
+            rm -f "$tmp_file"; return 1
+        fi
+        green "SHA256 校验通过"
+    else
+        yellow "警告：无法获取官方 SHA256，跳过校验"
+    fi
+
+    mv "$tmp_file" "$dest"
+    chmod +x "$dest"
+    chown root:root "$dest"
+}
+
 # ── 安装核心 ──────────────────────────────────────
 install_singbox() {
     clear
-    purple "正在安装 sing-box，请稍候..."
+    purple "正在安装 sing-box，请稍候…"
 
     local arch_raw arch
     arch_raw=$(uname -m)
@@ -155,26 +252,21 @@ install_singbox() {
     mkdir -p "${work_dir}" "${conf_dir}"
     chmod 700 "${work_dir}"
 
-    yellow "正在下载 sing-box..."
-    curl -fsSLo "${work_dir}/sing-box" "https://${arch}.ssss.nyc.mn/sbx-1.13.13" \
-        || { red "sing-box 下载失败"; exit 1; }
+    # FIX #1/#10: 用官方源下载，附 SHA256 校验
+    download_singbox "$arch" "$SB_VERSION" "${work_dir}/sing-box" \
+        || exit 1
+    download_cloudflared "$arch" "${work_dir}/argo" \
+        || exit 1
 
-    yellow "正在下载 argo..."
-    curl -fsSLo "${work_dir}/argo" "https://${arch}.ssss.nyc.mn/bot" \
-        || { red "argo 下载失败"; exit 1; }
-
-    yellow "正在下载 qrencode..."
-    curl -fsSLo "${work_dir}/qrencode" "https://${arch}.ssss.nyc.mn/qrencode" \
-        || { red "qrencode 下载失败"; exit 1; }
-
-    chmod +x "${work_dir}/sing-box" "${work_dir}/argo" "${work_dir}/qrencode"
-    chown root:root "${work_dir}/sing-box" "${work_dir}/argo"
+    # qrencode 直接用系统包，无需手动下载
+    apt-get install -y qrencode 2>/dev/null || yellow "qrencode 安装失败，二维码功能不可用"
 
     local hy2_port uuid
     hy2_port=$(shuf -i 10000-65000 -n 1)
     uuid=$(cat /proc/sys/kernel/random/uuid)
 
-    allow_port "${ARGO_PORT}/tcp" "${hy2_port}/udp"
+    # FIX #4: VMess 只监听本地；Argo 与本机通信用 127.0.0.1，无需对外开放 ARGO_PORT
+    allow_port "${hy2_port}/udp"
 
     yellow "正在生成 TLS 证书..."
     openssl ecparam -genkey -name prime256v1 -out "${work_dir}/private.key" 2>/dev/null
@@ -215,13 +307,14 @@ EOF
 }
 EOF
 
+    # FIX #4: listen 改为 127.0.0.1，VMess 不直接暴露公网
     cat > "${conf_dir}/inbounds.json" << EOF
 {
   "inbounds": [
     {
       "type": "vmess",
       "tag": "vmess-ws",
-      "listen": "0.0.0.0",
+      "listen": "127.0.0.1",
       "listen_port": ${ARGO_PORT},
       "users": [{"uuid": "${uuid}"}],
       "transport": {
@@ -308,6 +401,7 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
 
+    # argo 服务初始为占位，configure_fixed_tunnel 时覆盖
     cat > /etc/systemd/system/argo.service << 'EOF'
 [Unit]
 Description=Cloudflare Tunnel
@@ -335,20 +429,20 @@ manage_service() {
     local name="$1" action="$2"
     case "$action" in
         start)
-            yellow "正在启动 ${name}..."
+            yellow "正在启动 ${name}…"
             systemctl start "$name"
-            [ $? -eq 0 ] && green "${name} 已启动" || red "${name} 启动失败"
+            systemctl is-active "$name" &>/dev/null && green "${name} 已启动" || red "${name} 启动失败"
             ;;
         stop)
-            yellow "正在停止 ${name}..."
+            yellow "正在停止 ${name}…"
             systemctl stop "$name"
-            [ $? -eq 0 ] && green "${name} 已停止" || red "${name} 停止失败"
+            ! systemctl is-active "$name" &>/dev/null && green "${name} 已停止" || red "${name} 停止失败"
             ;;
         restart)
-            yellow "正在重启 ${name}..."
+            yellow "正在重启 ${name}…"
             systemctl daemon-reload
             systemctl restart "$name"
-            [ $? -eq 0 ] && green "${name} 已重启" || red "${name} 重启失败"
+            systemctl is-active "$name" &>/dev/null && green "${name} 已重启" || red "${name} 重启失败"
             ;;
     esac
 }
@@ -363,16 +457,14 @@ restart_argo()   { manage_service "argo" "restart"; }
 # ── 隧道工具 ──────────────────────────────────────
 get_fixed_domain() {
     grep 'hostname:' "${work_dir}/tunnel.yml" 2>/dev/null \
-        | head -1 \
-        | sed 's/.*hostname:[[:space:]]*//' \
-        | tr -d '[:space:]'
+        | head -1 | sed 's/.*hostname:[[:space:]]*//' | tr -d '[:space:]'
 }
 
 is_fixed_tunnel_configured() { [ -f "${work_dir}/tunnel.yml" ]; }
 
 # ── 节点信息生成 ──────────────────────────────────
 get_info() {
-    yellow "\nIP 检测中，请稍候...\n"
+    yellow "\nIP 检测中，请稍候…\n"
     local server_ip node_prefix
     server_ip=$(curl -4 -sm3 ip.sb)
     [ -z "$server_ip" ] && { red "获取 IP 失败"; return 1; }
@@ -396,11 +488,10 @@ get_info() {
     local argodomain=""
     is_fixed_tunnel_configured && argodomain=$(get_fixed_domain)
 
-    # argodomain 为空时只写 hy2 节点，跳过 vmess
     if [ -z "$argodomain" ]; then
         yellow "未检测到固定隧道域名，VMess 节点暂不可用，请先配置 Argo 固定隧道\n"
         cat > "${client_dir}" << EOF
-hysteria2://${uuid}@${server_ip}:${hy2_port}/?sni=bing.com&insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+hysteria2://${uuid}@${server_ip}:${hy2_port}?insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     else
         green "\nArgo 域名：${argodomain}\n"
@@ -423,7 +514,7 @@ EOF
         cat > "${client_dir}" << EOF
 vmess://$(echo "$vmess_json" | base64 | tr -d '\n')
 
-hysteria2://${uuid}@${server_ip}:${hy2_port}/?sni=bing.com&insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+hysteria2://${uuid}@${server_ip}:${hy2_port}?insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     fi
 
@@ -442,7 +533,7 @@ check_nodes() {
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         echo -e "\e[1;35m${line}\033[0m\n"
-        [ -x "${work_dir}/qrencode" ] && "${work_dir}/qrencode" "$line"
+        command_exists qrencode && qrencode -t ANSIUTF8 "$line"
         echo ""
     done < "${client_dir}"
 }
@@ -473,6 +564,8 @@ cn_block_manage() {
             if $block_enabled; then
                 yellow "大陆拦截已开启，无需重复操作\n"; sleep 1; return
             fi
+            local tmp_file
+            tmp_file=$(mktemp)
             jq '
               .route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary",
                 "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
@@ -485,7 +578,7 @@ cn_block_manage() {
                  "outbound":"direct"},
                 {"rule_set":["geosite-cn"],"outbound":"block"}
               ] + .route.rules
-            ' "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
+            ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file"
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已开启\n"
@@ -494,6 +587,8 @@ cn_block_manage() {
             if ! $block_enabled; then
                 yellow "大陆拦截未开启\n"; sleep 1; return
             fi
+            local tmp_file
+            tmp_file=$(mktemp)
             jq '
               del(.route.rules[] | select(.rule_set[]? == "geosite-cn")) |
               del(.route.rules[] | select(
@@ -501,7 +596,7 @@ cn_block_manage() {
                   (.domain_regex[] | test("googleapis"))
               )) |
               del(.route.rule_set[] | select(.tag == "geosite-cn"))
-            ' "$route_file" > "${route_file}.tmp" && mv "${route_file}.tmp" "$route_file"
+            ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file"
             [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
             restart_singbox
             green "\n大陆域名拦截已关闭\n"
@@ -534,23 +629,36 @@ change_config() {
         1)
             reading "\n请输入新的 UUID（回车随机生成）: " new_uuid
             [ -z "$new_uuid" ] && new_uuid=$(cat /proc/sys/kernel/random/uuid)
+            # FIX #9: 校验 UUID 格式
+            if [[ -n "$new_uuid" ]] && \
+               ! [[ "$new_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+                red "UUID 格式不合法"; sleep 1; return
+            fi
+            local tmp_file
+            tmp_file=$(mktemp)
             jq --arg u "$new_uuid" '
                 (.inbounds[] | select(.users) | .users[] | select(.uuid)     | .uuid)     = $u |
                 (.inbounds[] | select(.users) | .users[] | select(.password) | .password) = $u
-            ' "$inbounds_file" > "${inbounds_file}.tmp" \
-                && mv "${inbounds_file}.tmp" "$inbounds_file"
+            ' "$inbounds_file" > "$tmp_file" \
+                && mv "$tmp_file" "$inbounds_file"
             restart_singbox && get_info
             green "\nUUID 已修改为：${new_uuid}\n"
             ;;
         2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
+            # FIX #9: 校验端口范围
+            if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
+                red "端口无效（1-65535）"; sleep 1; return
+            fi
             old_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "$inbounds_file")
             remove_port "${old_port}/udp"
+            local tmp_file
+            tmp_file=$(mktemp)
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="hysteria2") | .listen_port) = $p' \
-                "$inbounds_file" > "${inbounds_file}.tmp" \
-                && mv "${inbounds_file}.tmp" "$inbounds_file"
+                "$inbounds_file" > "$tmp_file" \
+                && mv "$tmp_file" "$inbounds_file"
             allow_port "${new_port}/udp"
             restart_singbox && get_info
             green "\nHysteria2 端口已修改为：${new_port}\n"
@@ -558,13 +666,20 @@ change_config() {
         3)
             reading "\n请输入新的 VMess-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
+            # FIX #9: 校验端口范围
+            if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
+                red "端口无效（1-65535）"; sleep 1; return
+            fi
             old_port=$(jq -r '.inbounds[] | select(.type=="vmess") | .listen_port' "$inbounds_file")
             remove_port "${old_port}/tcp"
+            local tmp_file
+            tmp_file=$(mktemp)
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vmess") | .listen_port) = $p' \
-                "$inbounds_file" > "${inbounds_file}.tmp" \
-                && mv "${inbounds_file}.tmp" "$inbounds_file"
-            allow_port "${new_port}/tcp"
+                "$inbounds_file" > "$tmp_file" \
+                && mv "$tmp_file" "$inbounds_file"
+            # FIX #4: VMess 监听 127.0.0.1，不需要对外放行端口
+            # VMess-Argo 端口只需更新 tunnel.yml，不调用 allow_port
             if [ -f "${work_dir}/tunnel.yml" ]; then
                 sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
                     "${work_dir}/tunnel.yml"
@@ -591,6 +706,7 @@ change_config() {
                     ;;
             esac
             printf 'CFIP=%s\nCFPORT=%s\n' "$cfip" "$cfport" > "${work_dir}/cf.env"
+            chmod 600 "${work_dir}/cf.env"
             CFIP="$cfip"; CFPORT="$cfport"
             get_info
             green "\nCF 优选已更新为：${cfip}:${cfport}\n"
@@ -601,6 +717,7 @@ change_config() {
 }
 
 # ── 升级 sing-box ─────────────────────────────────
+# FIX #10: 查询最新版本，与当前版本对比，用官方源下载
 upgrade_singbox() {
     check_singbox &>/dev/null
     [ $? -eq 2 ] && { yellow "sing-box 尚未安装！"; sleep 1; return; }
@@ -613,15 +730,41 @@ upgrade_singbox() {
         *) red "不支持的架构: ${arch_raw}"; return 1 ;;
     esac
 
-    yellow "正在下载最新版 sing-box...\n"
-    curl -fsSLo "${work_dir}/sing-box.tmp" "https://${arch}.ssss.nyc.mn/sbx-1.13.13" \
-        || { red "下载失败"; return 1; }
+    # 查询当前版本
+    local current_ver
+    current_ver=$("${work_dir}/sing-box" version 2>/dev/null \
+        | grep -oP '\d+\.\d+\.\d+' | head -1)
+    yellow "当前版本: ${current_ver:-未知}"
+
+    # 查询 GitHub 最新版本
+    yellow "正在查询最新版本…"
+    local latest_ver
+    latest_ver=$(get_latest_sb_version)
+    if [ -z "$latest_ver" ]; then
+        yellow "无法获取最新版本，将使用脚本内置版本 ${SB_VERSION}"
+        latest_ver="$SB_VERSION"
+    else
+        green "最新版本: ${latest_ver}"
+    fi
+
+    if [ "$current_ver" = "$latest_ver" ]; then
+        green "已是最新版 ${latest_ver}，无需升级\n"
+        return
+    fi
+
+    reading "确认升级到 v${latest_ver}？(y/n): " confirm
+    [[ "$confirm" != [yY] ]] && { purple "已取消\n"; return; }
+
+    local tmp_dest
+    tmp_dest=$(mktemp)
+    download_singbox "$arch" "$latest_ver" "$tmp_dest" || return 1
 
     stop_singbox
-    mv "${work_dir}/sing-box.tmp" "${work_dir}/sing-box"
+    mv "$tmp_dest" "${work_dir}/sing-box"
     chmod +x "${work_dir}/sing-box"
+    chown root:root "${work_dir}/sing-box"
     start_singbox
-    green "\nsing-box 已升级完成\n"
+    green "\nsing-box 已升级至 v${latest_ver}\n"
     "${work_dir}/sing-box" version
 }
 
@@ -634,6 +777,11 @@ configure_fixed_tunnel() {
     reading "\n请输入 Argo 域名: " argo_domain
     [ -z "$argo_domain" ] && { red "域名不能为空"; return 1; }
 
+    # FIX #7: 校验域名格式，防止特殊字符破坏 YAML 结构
+    if ! [[ "$argo_domain" =~ ^[A-Za-z0-9._-]+\.[A-Za-z]{2,}$ ]]; then
+        red "域名格式不合法"; return 1
+    fi
+
     reading "\n请输入 Argo 密钥（Token 或 JSON）: " argo_auth
     [ -z "$argo_auth" ] && { red "密钥不能为空"; return 1; }
 
@@ -641,11 +789,12 @@ configure_fixed_tunnel() {
         echo "$argo_auth" > "${work_dir}/tunnel.json"
         chmod 600 "${work_dir}/tunnel.json"
         local tunnel_id
-        tunnel_id=$(echo "$argo_auth" | jq -r '(.TunnelID // .tunnelID // .tunnel_id) // empty' 2>/dev/null)
-[ -z "$tunnel_id" ] && { red "无法解析 TunnelID，请检查 JSON 格式"; return 1; }
-        if [ -z "$tunnel_id" ]; then
-            red "无法解析 TunnelID，请检查 JSON 格式"; return 1
-        fi
+        tunnel_id=$(echo "$argo_auth" \
+            | jq -r '(.TunnelID // .tunnelID // .tunnel_id) // empty' 2>/dev/null)
+
+        # FIX #5: 删除死代码，保留单次判断
+        [ -z "$tunnel_id" ] && { red "无法解析 TunnelID，请检查 JSON 格式"; return 1; }
+
         cat > "${work_dir}/tunnel.yml" << EOF
 tunnel: ${tunnel_id}
 credentials-file: ${work_dir}/tunnel.json
@@ -658,6 +807,8 @@ ingress:
       noTLSVerify: true
   - service: http_status:404
 EOF
+
+        # FIX #2: Token 写文件，不拼入 ExecStart cmdline
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -676,7 +827,12 @@ WantedBy=multi-user.target
 EOF
 
     elif [[ "$argo_auth" =~ ^[A-Za-z0-9._-]{100,500}$ ]]; then
+        # FIX #2: Token 写入权限 600 的文件，通过 --token-file 传入
+        printf '%s' "$argo_auth" > "${work_dir}/argo.token"
+        chmod 600 "${work_dir}/argo.token"
+
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
+
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -686,7 +842,7 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${argo_auth}
+ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token-file ${work_dir}/argo.token
 Restart=on-failure
 RestartSec=5s
 
@@ -710,15 +866,13 @@ manage_argo() {
     argo_status=$(check_argo 2>&1)
     clear; echo ""
     green "=== Argo 隧道管理 === 状态: ${argo_status}\n"
-    is_fixed_tunnel_configured \
-        && green "当前域名: $(get_fixed_domain)\n" \
-        || yellow "固定隧道尚未配置\n"
+    is_fixed_tunnel_configured && green "当前域名: $(get_fixed_domain)\n" || yellow "固定隧道尚未配置\n"
     green  "1. 启动 Argo"
     green  "2. 停止 Argo"
     green  "3. 重启 Argo"
     green  "4. 配置固定隧道"
     purple "0. 返回主菜单"
-    skyblue "------------"
+    skyblue "————"
     reading "\n请输入选择: " choice
     case "$choice" in
         1) start_argo ;;
@@ -731,36 +885,38 @@ manage_argo() {
 }
 
 # ── sing-box 管理菜单 ─────────────────────────────
+# FIX #8: 改为 while 循环，避免无效输入导致无限递归
 manage_singbox() {
     local sb_status
-    sb_status=$(check_singbox 2>&1)
-    clear; echo ""
-    green "=== sing-box 管理 === 状态: ${sb_status}\n"
-    green  "1. 启动 sing-box"
-    green  "2. 停止 sing-box"
-    green  "3. 重启 sing-box"
-    purple "0. 返回主菜单"
-    skyblue "------------"
-    reading "\n请输入选择: " choice
-    case "$choice" in
-        1) start_singbox ;;
-        2) stop_singbox ;;
-        3) restart_singbox ;;
-        0) return ;;
-        *) red "无效选项！"; sleep 1; manage_singbox ;;
-    esac
+    while true; do
+        sb_status=$(check_singbox 2>&1)
+        clear; echo ""
+        green "=== sing-box 管理 === 状态: ${sb_status}\n"
+        green  "1. 启动 sing-box"
+        green  "2. 停止 sing-box"
+        green  "3. 重启 sing-box"
+        purple "0. 返回主菜单"
+        skyblue "————"
+        reading "\n请输入选择: " choice
+        case "$choice" in
+            1) start_singbox ;;
+            2) stop_singbox ;;
+            3) restart_singbox ;;
+            0) return ;;
+            *) red "无效选项！"; sleep 1 ;;
+        esac
+    done
 }
 
 # ── 卸载 ──────────────────────────────────────────
 uninstall_singbox() {
     reading "确定要卸载 sing-box 吗? (y/n): " choice
     [[ "$choice" != [yY] ]] && { purple "已取消卸载\n"; return; }
-    yellow "正在卸载..."
+    yellow "正在卸载…"
     systemctl stop    sing-box argo 2>/dev/null
     systemctl disable sing-box argo 2>/dev/null
     systemctl daemon-reload
-    rm -f /etc/systemd/system/sing-box.service \
-          /etc/systemd/system/argo.service
+    rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
     rm -rf "${work_dir}"
     rm -f /usr/bin/sb
     green "\nsing-box 卸载完成\n"
@@ -771,7 +927,7 @@ uninstall_singbox() {
 create_shortcut() {
     cat > "${work_dir}/sb.sh" << EOF
 #!/usr/bin/env bash
-bash <(curl -Ls ${SCRIPT_URL}) \$1
+bash <(curl -fsSL ${SCRIPT_URL}) \$1
 EOF
     chmod +x "${work_dir}/sb.sh"
     ln -sf "${work_dir}/sb.sh" /usr/bin/sb
@@ -780,10 +936,11 @@ EOF
 
 # ── 更新脚本 ──────────────────────────────────────
 update_script() {
-    yellow "正在从 GitHub 拉取最新脚本...\n"
-    local tmp="${work_dir}/sb.sh.tmp"
-    curl -fsSL "${SCRIPT_URL}" -o "$tmp"
-    if [ $? -eq 0 ] && grep -q "sing-box" "$tmp" && [ "$(wc -l < "$tmp")" -gt 50 ]; then
+    yellow "正在从 GitHub 拉取最新脚本…\n"
+    local tmp
+    tmp=$(mktemp)
+    curl -fsSL "$SCRIPT_URL" -o "$tmp"
+    if [ -s "$tmp" ] && [ "$(wc -c < "$tmp")" -gt 50 ]; then
         mv "$tmp" "${work_dir}/sb.sh"
         chmod +x "${work_dir}/sb.sh"
         ln -sf "${work_dir}/sb.sh" /usr/bin/sb
@@ -845,12 +1002,11 @@ case "$1" in
         do_install
         ;;
     -u|--uninstall)
-        yellow "正在无交互卸载 sing-box...\n"
+        yellow "正在无交互卸载 sing-box…\n"
         systemctl stop    sing-box argo 2>/dev/null
         systemctl disable sing-box argo 2>/dev/null
         systemctl daemon-reload
-        rm -f /etc/systemd/system/sing-box.service \
-              /etc/systemd/system/argo.service
+        rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
         rm -rf "${work_dir}"
         rm -f /usr/bin/sb
         green "\nsing-box 卸载完成\n"
@@ -885,21 +1041,22 @@ case "$1" in
                     ;;
                 2)  uninstall_singbox;  need_pause=false ;;
                 3)  manage_singbox;     need_pause=false ;;
-                4)  manage_argo;        need_pause=true ;;
-                5)  get_info;           need_pause=true ;;
-                6)  change_config;      need_pause=true ;;
-                7)  cn_block_manage;    need_pause=true ;;
-                8)  upgrade_singbox;    need_pause=true ;;
+                4)  manage_argo;        need_pause=true  ;;
+                5)  get_info;           need_pause=true  ;;
+                6)  change_config;      need_pause=true  ;;
+                7)  cn_block_manage;    need_pause=true  ;;
+                8)  upgrade_singbox;    need_pause=true  ;;
                 9)  update_script;      need_pause=false ;;
                 10)
                     clear
-                    bash <(curl -Ls ssh_tool.eooce.com)
+                    # FIX #3: 确保使用 https://
+                    bash <(curl -fsSL https://ssh_tool.eooce.com)
                     need_pause=false
                     ;;
                 0) exit 0 ;;
                 *) red "无效选项，请输入 0-10" ;;
             esac
-            [ "$need_pause" = true ] && read -n1 -s -r -p $'\033[1;91m按任意键返回...\033[0m'
+            [ "$need_pause" = true ] && read -n1 -s -r -p $'\033[1;91m按任意键返回…\033[0m'
             echo ""
         done
         ;;
