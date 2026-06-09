@@ -2,7 +2,7 @@
 # 自用 sing-box 安装脚本
 # 协议: vmess-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.9
+# 最后更新时间: 2026.6.10
 # =========================
 
 export LANG=en_US.UTF-8
@@ -249,9 +249,18 @@ pick_free_udp_port() {
 }
 
 # ── 安装核心 ──────────────────────────────────────
+# FIX #4-new: 接收版本号参数；检查 ARGO_PORT 占用
 install_singbox() {
     clear
     purple "正在安装 sing-box，请稍候…"
+
+    local sb_ver="${1:-$SB_VERSION}"   # FIX #5-new: 接收外部传入版本，回退到硬编码
+
+    # FIX #4-new: 检查 ARGO_PORT 是否被占用
+    if ss -tlnH | awk '{print $5}' | grep -q ":${ARGO_PORT}$"; then
+        red "端口 ${ARGO_PORT} 已被占用，请修改 ARGO_PORT 后重试"
+        exit 1
+    fi
 
     local arch_raw arch
     arch_raw=$(uname -m)
@@ -264,8 +273,8 @@ install_singbox() {
     mkdir -p "${work_dir}" "${conf_dir}"
     chmod 700 "${work_dir}"
 
-    # FIX #1/#10: 用官方源下载，附 SHA256 校验
-    download_singbox "$arch" "$SB_VERSION" "${work_dir}/sing-box" \
+    # FIX #5-new: 使用传入的版本号，而非硬编码 $SB_VERSION
+    download_singbox "$arch" "$sb_ver" "${work_dir}/sing-box" \
         || exit 1
     download_cloudflared "$arch" "${work_dir}/argo" \
         || exit 1
@@ -710,6 +719,10 @@ change_config() {
                 sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
                     "${work_dir}/tunnel.yml"
             fi
+            # 提示 token 模式需手动同步
+            if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
+                yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
+            fi
             restart_singbox && restart_argo && get_info
             green "\nVMess-Argo 端口已修改为：${new_port}\n"
             ;;
@@ -1010,7 +1023,19 @@ menu() {
 # ── 安装流程 ──────────────────────────────────────
 do_install() {
     install_packages jq openssl curl
-    install_singbox
+
+    # FIX #5-new: 查询最新版本，失败则回退硬编码
+    yellow "正在查询 sing-box 最新版本…"
+    local install_ver
+    install_ver=$(get_latest_sb_version)
+    if [ -z "$install_ver" ]; then
+        yellow "无法获取最新版本，使用内置版本 ${SB_VERSION}"
+        install_ver="$SB_VERSION"
+    else
+        green "将安装最新版本 v${install_ver}"
+    fi
+
+    install_singbox "$install_ver"   # FIX #5-new: 传入版本号
     setup_services
     sleep 2
     create_shortcut
