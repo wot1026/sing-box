@@ -493,11 +493,11 @@ EOF
               net:"ws", type:"none",
               host:$host, path:"/vmess-argo?ed=2560",
               tls:"tls", sni:$host,
-              alpn:"", fp:"chrome", insecure:"0"}')
+              alpn:"", fp:"chrome"}')
         cat > "${client_dir}" << EOF
 vmess://$(echo "$vmess_json" | base64 | tr -d '\n')
 
-hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     fi
 
