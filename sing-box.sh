@@ -150,10 +150,8 @@ get_node_name() { echo "$(get_flag) $(hostname)"; }
 # SPKI 指纹（公钥 SHA256），在 URI query 参数里去掉 = padding
 # 避免 = 被 URL parser 当成参数分隔符，客户端均兼容无 padding 的 base64
 get_hy2_fingerprint() {
-    openssl x509 -in "${work_dir}/cert.pem" -pubkey -noout 2>/dev/null \
-        | openssl pkey -pubin -outform DER 2>/dev/null \
-        | openssl dgst -sha256 2>/dev/null \
-        | awk '{print toupper($2)}'
+    openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" 2>/dev/null \
+        | cut -d'=' -f2 | sed 's/:/%3A/g'
 }
 
 # ── FIX #1/#10: 官方源下载 + SHA256 校验 ─────────
