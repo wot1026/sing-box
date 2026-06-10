@@ -485,7 +485,7 @@ EOF
         vmess_json=$(jq -n \
             --arg  ps   "${node_prefix} argo" \
             --arg  add  "${CFIP}" \
-            --argjson port "$_port" \
+            --arg  port "$_port" \
             --arg  id   "${uuid}" \
             --arg  host "${argodomain}" \
             '{v:"2", ps:$ps, add:$add, port:$port,
@@ -493,7 +493,7 @@ EOF
               net:"ws", type:"none",
               host:$host, path:"/vmess-argo?ed=2560",
               tls:"tls", sni:$host,
-              alpn:"", fp:"chrome", allowInsecure:false}')
+              alpn:"", fp:"chrome", insecure:"0"}')
         cat > "${client_dir}" << EOF
 vmess://$(echo "$vmess_json" | base64 | tr -d '\n')
 
