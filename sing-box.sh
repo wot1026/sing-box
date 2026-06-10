@@ -493,7 +493,7 @@ EOF
               net:"ws", type:"none",
               host:$host, path:"/vmess-argo?ed=2560",
               tls:"tls", sni:$host,
-              alpn:"", fp:"chrome"insecure:"0"}')
+              alpn:"", fp:"chrome", insecure:"0"}')
         cat > "${client_dir}" << EOF
 vmess://$(echo "$vmess_json" | base64 | tr -d '\n')
 
