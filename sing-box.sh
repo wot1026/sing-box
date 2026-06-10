@@ -152,8 +152,8 @@ get_node_name() { echo "$(get_flag) $(hostname)"; }
 get_hy2_fingerprint() {
     openssl x509 -in "${work_dir}/cert.pem" -pubkey -noout 2>/dev/null \
         | openssl pkey -pubin -outform DER 2>/dev/null \
-        | openssl dgst -sha256 -binary 2>/dev/null \
-        | base64 | tr -d '=' | tr -d '\n'
+        | openssl dgst -sha256 2>/dev/null \
+        | awk '{print toupper($2)}'
 }
 
 # ── FIX #1/#10: 官方源下载 + SHA256 校验 ─────────
@@ -477,7 +477,7 @@ get_info() {
     if [ -z "$argodomain" ]; then
         yellow "未检测到固定隧道域名，VMess 节点暂不可用，请先配置 Argo 固定隧道\n"
         cat > "${client_dir}" << EOF
-hysteria2://${uuid}@${server_ip}:${hy2_port}?insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     else
         green "\nArgo 域名：${argodomain}\n"
@@ -496,11 +496,10 @@ EOF
               host:$host, path:"/vmess-argo?ed=2560",
               tls:"tls", sni:$host,
               alpn:"", fp:"chrome", allowInsecure:false}')
-
         cat > "${client_dir}" << EOF
 vmess://$(echo "$vmess_json" | base64 | tr -d '\n')
 
-hysteria2://${uuid}@${server_ip}:${hy2_port}?insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&insecure=0&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     fi
 
