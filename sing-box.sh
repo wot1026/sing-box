@@ -300,6 +300,7 @@ EOF
       "transport": {
         "type": "ws",
         "path": "/vmess-argo",
+        "max_early_data": 2560,
         "early_data_header_name": "Sec-WebSocket-Protocol"
       }
     },
@@ -491,7 +492,7 @@ EOF
             '{v:"2", ps:$ps, add:$add, port:$port,
               id:$id, aid:"0", scy:"none",
               net:"ws", type:"none",
-              host:$host, path:"/vmess-argo?ed=2560",
+              host:$host, path:"/vmess-argo",
               tls:"tls", sni:$host,
               alpn:"", fp:"chrome"}')
         cat > "${client_dir}" << EOF
