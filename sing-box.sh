@@ -1,8 +1,8 @@
 # =========================
 # 自用 sing-box 安装脚本
-# 协议: vmess-argo(固定隧道) + hysteria2
+# 协议: vless-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.10
+# 最后更新时间: 2026.6.11
 # =========================
 
 export LANG=en_US.UTF-8
@@ -24,7 +24,6 @@ client_dir="${work_dir}/url.txt"
 SCRIPT_URL="https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/sing-box.sh"
 ARGO_PORT="8001"
 
-# FIX #10: 版本号统一在顶部维护，install 和 upgrade 共用
 SB_VERSION="1.13.13"
 
 export CFIP=${CFIP:-'cf.877774.xyz'}
@@ -147,28 +146,23 @@ get_flag() {
 get_node_name() { echo "$(get_flag) $(hostname)"; }
 
 # ── Hysteria2 指纹 ────────────────────────────────
-# SPKI 指纹（公钥 SHA256），在 URI query 参数里去掉 = padding
-# 避免 = 被 URL parser 当成参数分隔符，客户端均兼容无 padding 的 base64
 get_hy2_fingerprint() {
     openssl x509 -noout -fingerprint -sha256 -in "${work_dir}/cert.pem" 2>/dev/null \
         | cut -d'=' -f2 | sed 's/:/%3A/g'
 }
 
-# ── FIX #1/#10: 官方源下载 + SHA256 校验 ─────────
-# 从 GitHub 查询 sing-box 最新版本号
+# ── 官方源下载 ────────────────────────────────────
 get_latest_sb_version() {
     curl -fsSL "https://api.github.com/repos/SagerNet/sing-box/releases/latest" \
         | jq -r '.tag_name // empty' | tr -d 'v'
 }
 
-# 下载 sing-box（官方 GitHub Release）
 download_singbox() {
     local arch="$1" version="$2" dest="$3"
     local base_url="https://github.com/SagerNet/sing-box/releases/download/v${version}"
     local tarball="sing-box-${version}-linux-${arch}.tar.gz"
-    local tmp_tar
+    local tmp_tar tmp_dir
     tmp_tar=$(mktemp)
-    local tmp_dir
     tmp_dir=$(mktemp -d)
 
     yellow "正在下载 sing-box v${version}..."
@@ -185,7 +179,6 @@ download_singbox() {
     chown root:root "$dest"
 }
 
-# 下载 cloudflared（官方 GitHub Release）
 download_cloudflared() {
     local arch="$1" dest="$2"
     local bin_name="cloudflared-linux-${arch}"
@@ -202,7 +195,7 @@ download_cloudflared() {
     chown root:root "$dest"
 }
 
-# ── FIX #8: 查找未被占用的 UDP 端口 ──────────────
+# ── 查找未被占用的 UDP 端口 ───────────────────────
 pick_free_udp_port() {
     local port attempts=0
     port=$(shuf -i 10000-65000 -n 1)
@@ -236,16 +229,17 @@ install_singbox() {
     mkdir -p "${work_dir}" "${conf_dir}"
     chmod 700 "${work_dir}"
 
-    download_singbox "$arch" "$sb_ver" "${work_dir}/sing-box" \
-        || exit 1
-    download_cloudflared "$arch" "${work_dir}/argo" \
-        || exit 1
+    download_singbox "$arch" "$sb_ver" "${work_dir}/sing-box" || exit 1
+    download_cloudflared "$arch" "${work_dir}/argo"           || exit 1
 
     apt-get install -y qrencode 2>/dev/null || yellow "qrencode 安装失败，二维码功能不可用"
 
     local hy2_port uuid
     hy2_port=$(pick_free_udp_port)
     uuid=$(cat /proc/sys/kernel/random/uuid)
+
+    # vless ws path 使用 uuid 前缀，更隐蔽
+    local vless_path="${uuid}-vless"
 
     allow_port "${hy2_port}/udp"
 
@@ -288,18 +282,25 @@ EOF
 }
 EOF
 
+    # ── 关键改动：vmess → vless ──────────────────
+    # vless+ws 不需要 tls（由 Argo 隧道负责终结），
+    # 因此 inbound 里不加 tls 块，保持 listen 在 127.0.0.1
     cat > "${conf_dir}/inbounds.json" << EOF
 {
   "inbounds": [
     {
-      "type": "vmess",
-      "tag": "vmess-ws",
+      "type": "vless",
+      "tag": "vless-ws",
       "listen": "127.0.0.1",
       "listen_port": ${ARGO_PORT},
-      "users": [{"uuid": "${uuid}"}],
+      "users": [
+        {
+          "uuid": "${uuid}"
+        }
+      ],
       "transport": {
         "type": "ws",
-        "path": "/vmess-argo",
+        "path": "/${vless_path}",
         "max_early_data": 2560,
         "early_data_header_name": "Sec-WebSocket-Protocol"
       }
@@ -356,7 +357,7 @@ EOF
 EOF
 
     green "sing-box 核心安装完成"
-    yellow "注意：需在 Argo 隧道管理 中配置固定隧道后，VMess 节点才可用"
+    yellow "注意：需在 Argo 隧道管理 中配置固定隧道后，VLESS 节点才可用"
 }
 
 # ── systemd 服务 ──────────────────────────────────
@@ -462,7 +463,8 @@ get_info() {
 
     local hy2_port uuid fingerprint
     hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${conf_dir}/inbounds.json")
-    uuid=$(jq -r '.inbounds[] | select(.type=="vmess") | .users[0].uuid' "${conf_dir}/inbounds.json")
+    # ── 关键改动：select type 改为 vless ──────────
+    uuid=$(jq -r '.inbounds[] | select(.type=="vless") | .users[0].uuid' "${conf_dir}/inbounds.json")
 
     fingerprint=$(get_hy2_fingerprint)
     if [ -z "$fingerprint" ]; then
@@ -470,33 +472,33 @@ get_info() {
         return 1
     fi
 
+    # ── 从 inbounds.json 读取 vless ws path ──────
+    local vless_path
+    vless_path=$(jq -r '.inbounds[] | select(.type=="vless") | .transport.path' "${conf_dir}/inbounds.json" \
+        | sed 's|^/||')
+
     local argodomain=""
     is_fixed_tunnel_configured && argodomain=$(get_fixed_domain)
 
     if [ -z "$argodomain" ]; then
-        yellow "未检测到固定隧道域名，VMess 节点暂不可用，请先配置 Argo 固定隧道\n"
+        yellow "未检测到固定隧道域名，VLESS 节点暂不可用，请先配置 Argo 固定隧道\n"
         cat > "${client_dir}" << EOF
 hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     else
         green "\nArgo 域名：${argodomain}\n"
-        local vmess_json
+
         local _port="${CFPORT:-443}"
         [[ "$_port" =~ ^[0-9]+$ ]] || _port="443"
-        vmess_json=$(jq -n \
-            --arg  ps   "${node_prefix} argo" \
-            --arg  add  "${CFIP}" \
-            --arg  port "$_port" \
-            --arg  id   "${uuid}" \
-            --arg  host "${argodomain}" \
-            '{v:"2", ps:$ps, add:$add, port:$port,
-              id:$id, aid:"0", scy:"auto",
-              net:"ws", type:"none",
-              host:$host, path:"/vmess-argo?ed=2560",
-              tls:"tls", sni:$host,
-              alpn:"", fp:"chrome"}')
+
+        # ── 关键改动：生成 vless URI（无需 base64）─
+        # path 含 ?ed=2560，需先对 / 和 ? 做 URL 编码
+        # 实际编码：/path?ed=2560 → %2Fpath%3Fed%3D2560
+        local encoded_path
+        encoded_path="%2F${vless_path}%3Fed%3D2560"
+
         cat > "${client_dir}" << EOF
-vmess://$(echo "$vmess_json" | base64 | tr -d '\n')
+vless://${uuid}@${CFIP}:${_port}?encryption=none&security=tls&sni=${argodomain}&fp=chrome&type=ws&host=${argodomain}&path=${encoded_path}#${node_prefix} argo
 
 hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
@@ -550,7 +552,6 @@ cn_block_manage() {
             fi
             local tmp_file
             tmp_file=$(mktemp)
-            # FIX 问题2: 先 del 清理残留再 add，保证幂等
             jq '
               del(.route.rules[] | select(.rule_set[]? == "geosite-cn")) |
               del(.route.rules[] | select(
@@ -610,7 +611,7 @@ change_config() {
     green "=== 修改节点配置 === sing-box: ${sb_status}\n"
     green  "1. 修改 UUID"
     green  "2. 修改 Hysteria2 端口"
-    green  "3. 修改 VMess-Argo 端口"
+    green  "3. 修改 VLESS-Argo 端口"
     green  "4. 修改 CF 优选域名/IP"
     purple "0. 返回主菜单"
     skyblue "------------"
@@ -626,11 +627,20 @@ change_config() {
             fi
             local tmp_file
             tmp_file=$(mktemp)
+            # ── 关键改动：vless users 只有 uuid 字段，同步更新 hy2 password ──
             jq --arg u "$new_uuid" '
-                (.inbounds[] | select(.users) | .users[] | select(.uuid)     | .uuid)     = $u |
-                (.inbounds[] | select(.users) | .users[] | select(.password) | .password) = $u
+                (.inbounds[] | select(.type=="vless")     | .users[] | .uuid)     = $u |
+                (.inbounds[] | select(.type=="hysteria2") | .users[] | .password) = $u
             ' "$inbounds_file" > "$tmp_file" \
                 && mv "$tmp_file" "$inbounds_file"
+            # vless ws path 同步更新为新 uuid 前缀
+            local new_path="${new_uuid}-vless"
+            local tmp_file2
+            tmp_file2=$(mktemp)
+            jq --arg p "/${new_path}" \
+                '(.inbounds[] | select(.type=="vless") | .transport.path) = $p' \
+                "$inbounds_file" > "$tmp_file2" \
+                && mv "$tmp_file2" "$inbounds_file"
             restart_singbox && get_info
             green "\nUUID 已修改为：${new_uuid}\n"
             ;;
@@ -659,20 +669,19 @@ change_config() {
             green "\nHysteria2 端口已修改为：${new_port}\n"
             ;;
         3)
-            reading "\n请输入新的 VMess-Argo 端口（回车随机生成）: " new_port
+            reading "\n请输入新的 VLESS-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
             if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
                 red "端口无效（1-65535）"; sleep 1; return
             fi
-            # FIX 问题3: 补充 TCP 占用检查（VMess 监听 127.0.0.1，冲突同样导致启动失败）
             if ss -tlnH | awk '{print $5}' | grep -q ":${new_port}$"; then
                 red "端口 ${new_port} 已被占用，请换一个"; sleep 1; return
             fi
-            old_port=$(jq -r '.inbounds[] | select(.type=="vmess") | .listen_port' "$inbounds_file")
             local tmp_file
             tmp_file=$(mktemp)
+            # ── 关键改动：select type 改为 vless ──
             jq --argjson p "$new_port" \
-                '(.inbounds[] | select(.type=="vmess") | .listen_port) = $p' \
+                '(.inbounds[] | select(.type=="vless") | .listen_port) = $p' \
                 "$inbounds_file" > "$tmp_file" \
                 && mv "$tmp_file" "$inbounds_file"
             if [ -f "${work_dir}/tunnel.yml" ]; then
@@ -683,7 +692,7 @@ change_config() {
                 yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
             fi
             restart_singbox && restart_argo && get_info
-            green "\nVMess-Argo 端口已修改为：${new_port}\n"
+            green "\nVLESS-Argo 端口已修改为：${new_port}\n"
             ;;
         4)
             clear
@@ -756,7 +765,6 @@ upgrade_singbox() {
 
     stop_singbox
 
-    # FIX 问题4: 备份旧二进制，下载或启动失败时自动回滚
     cp "${work_dir}/sing-box" "${work_dir}/sing-box.bak"
 
     if mv "$tmp_dest" "${work_dir}/sing-box" && \
@@ -778,7 +786,7 @@ upgrade_singbox() {
 # ── 配置固定 Argo 隧道 ────────────────────────────
 configure_fixed_tunnel() {
     clear
-    yellow "\n固定隧道支持 JSON 凭据或 Token 两种方式，VMess 端口: ${ARGO_PORT}"
+    yellow "\n固定隧道支持 JSON 凭据或 Token 两种方式，VLESS 端口: ${ARGO_PORT}"
     yellow "JSON 获取：https://fscarmen.cloudflare.now.cc\n"
 
     reading "\n请输入 Argo 域名: " argo_domain
