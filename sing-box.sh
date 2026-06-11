@@ -51,13 +51,21 @@ check_argo()    { check_service "argo"     "${work_dir}/argo"; }
 
 # ── 包安装 ────────────────────────────────────────
 install_packages() {
-    apt-get update -y
+    local to_install=()
     for pkg in "$@"; do
         command_exists "$pkg" && { yellow "${pkg} 已安装，跳过"; continue; }
+        to_install+=("$pkg")
+    done
+    if [ ${#to_install[@]} -eq 0 ]; then
+        return 0
+    fi
+    apt-get update -y
+    for pkg in "${to_install[@]}"; do
         yellow "正在安装 ${pkg}…"
         apt-get install -y "$pkg" || { red "${pkg} 安装失败"; return 1; }
     done
 }
+
 
 # ── 防火墙放行 ────────────────────────────────────
 allow_port() {
@@ -1043,6 +1051,9 @@ case "$1" in
         systemctl disable sing-box argo 2>/dev/null
         systemctl daemon-reload
         rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
+        hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
+            "${conf_dir}/inbounds.json" 2>/dev/null)
+        [ -n "$hy2_port" ] && remove_port "${hy2_port}/udp"
         rm -rf "${work_dir}"
         rm -f /usr/bin/sb
         green "\nsing-box 卸载完成\n"
