@@ -625,25 +625,27 @@ change_config() {
                ! [[ "$new_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
                 red "UUID 格式不合法"; sleep 1; return
             fi
+            
             local tmp_file
             tmp_file=$(mktemp)
-            # ── 关键改动：vless users 只有 uuid 字段，同步更新 hy2 password ──
-            jq --arg u "$new_uuid" '
+            
+            # 合并 jq 操作：一次性完成 UUID 和 VLESS Path 的修改，避免配置产生不一致
+            jq --arg u "$new_uuid" --arg p "/${new_uuid}-vless" '
                 (.inbounds[] | select(.type=="vless")     | .users[] | .uuid)     = $u |
+                (.inbounds[] | select(.type=="vless")     | .transport.path)      = $p |
                 (.inbounds[] | select(.type=="hysteria2") | .users[] | .password) = $u
-            ' "$inbounds_file" > "$tmp_file" \
-                && mv "$tmp_file" "$inbounds_file"
-            # vless ws path 同步更新为新 uuid 前缀
-            local new_path="${new_uuid}-vless"
-            local tmp_file2
-            tmp_file2=$(mktemp)
-            jq --arg p "/${new_path}" \
-                '(.inbounds[] | select(.type=="vless") | .transport.path) = $p' \
-                "$inbounds_file" > "$tmp_file2" \
-                && mv "$tmp_file2" "$inbounds_file"
+            ' "$inbounds_file" > "$tmp_file" && mv "$tmp_file" "$inbounds_file"
+            
+            if [ $? -ne 0 ]; then
+                red "配置文件写入失败，请检查！"
+                sleep 2
+                return
+            fi
+            
             restart_singbox && get_info
             green "\nUUID 已修改为：${new_uuid}\n"
             ;;
+
         2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
             if [ -z "$new_port" ]; then
