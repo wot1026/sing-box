@@ -490,7 +490,7 @@ EOF
             --arg  id   "${uuid}" \
             --arg  host "${argodomain}" \
             '{v:"2", ps:$ps, add:$add, port:$port,
-              id:$id, aid:"0", scy:"none",
+              id:$id, aid:"0", scy:"auto",
               net:"ws", type:"none",
               host:$host, path:"/vmess-argo",
               tls:"tls", sni:$host,
