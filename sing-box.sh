@@ -2,7 +2,7 @@
 # 自用 sing-box 安装脚本
 # 协议: vless-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.11
+# 最后更新时间: 2026.6.12
 # =========================
 
 export LANG=en_US.UTF-8
@@ -82,11 +82,11 @@ allow_port() {
         [ $has_ufw -eq 1 ] && ufw allow in "${port}/${proto}" >/dev/null 2>&1
         if [ $has_iptables -eq 1 ]; then
             iptables  -C INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null \
-                || iptables  -A INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+                || iptables  -I INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
         fi
         if [ $has_ip6tables -eq 1 ]; then
             ip6tables -C INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null \
-                || ip6tables -A INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
+                || ip6tables -I INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
         fi
     done
 
@@ -202,6 +202,17 @@ pick_free_udp_port() {
     while ss -ulnH | awk '{print $5}' | grep -q ":${port}$"; do
         port=$(shuf -i 10000-65000 -n 1)
         (( attempts++ > 100 )) && { red "无法找到空闲 UDP 端口"; return 1; }
+    done
+    echo "$port"
+}
+
+# ── 查找未被占用的 TCP 端口 ───────────────────────
+pick_free_tcp_port() {
+    local port attempts=0
+    port=$(shuf -i 10000-65000 -n 1)
+    while ss -tlnH | awk '{print $5}' | grep -q ":${port}$"; do
+        port=$(shuf -i 10000-65000 -n 1)
+        (( attempts++ > 100 )) && { red "无法找到空闲 TCP 端口"; return 1; }
     done
     echo "$port"
 }
@@ -659,20 +670,21 @@ change_config() {
                 fi
             fi
             old_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "$inbounds_file")
-            remove_port "${old_port}/udp"
             local tmp_file
             tmp_file=$(mktemp)
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="hysteria2") | .listen_port) = $p' \
                 "$inbounds_file" > "$tmp_file" \
-                && mv "$tmp_file" "$inbounds_file"
+                && mv "$tmp_file" "$inbounds_file" \
+                || { red "配置写入失败"; sleep 1; return; }
+            remove_port "${old_port}/udp"
             allow_port "${new_port}/udp"
             restart_singbox && get_info
             green "\nHysteria2 端口已修改为：${new_port}\n"
             ;;
         3)
             reading "\n请输入新的 VLESS-Argo 端口（回车随机生成）: " new_port
-            [ -z "$new_port" ] && new_port=$(shuf -i 10000-65000 -n 1)
+            [ -z "$new_port" ] && new_port=$(pick_free_tcp_port)
             if ! [[ "$new_port" =~ ^[0-9]+$ ]] || (( new_port < 1 || new_port > 65535 )); then
                 red "端口无效（1-65535）"; sleep 1; return
             fi
@@ -709,6 +721,7 @@ change_config() {
                 *)
                     if [[ "$input" =~ : ]]; then
                         cfip="${input%%:*}"; cfport="${input##*:}"
+                        [[ ! "$cfport" =~ ^[0-9]+$ ]] || (( cfport > 65535 )) && cfport="443"
                     else
                         cfip="$input"; cfport="443"
                     fi
@@ -841,9 +854,6 @@ WantedBy=multi-user.target
 EOF
 
     elif [[ "$argo_auth" =~ ^[A-Za-z0-9._-]{100,500}$ ]]; then
-        printf '%s' "$argo_auth" > "${work_dir}/argo.token"
-        chmod 600 "${work_dir}/argo.token"
-
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
 
         cat > /etc/systemd/system/argo.service << EOF
