@@ -492,7 +492,7 @@ EOF
             '{v:"2", ps:$ps, add:$add, port:$port,
               id:$id, aid:"0", scy:"auto",
               net:"ws", type:"none",
-              host:$host, path:"/vmess-argo",
+              host:$host, path:"/vmess-argo?ed=2560",
               tls:"tls", sni:$host,
               alpn:"", fp:"chrome"}')
         cat > "${client_dir}" << EOF
