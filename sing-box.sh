@@ -939,6 +939,9 @@ uninstall_singbox() {
     systemctl disable sing-box argo 2>/dev/null
     systemctl daemon-reload
     rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
+    hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
+        "${conf_dir}/inbounds.json" 2>/dev/null)
+    [ -n "$hy2_port" ] && remove_port "${hy2_port}/udp"
     rm -rf "${work_dir}"
     rm -f /usr/bin/sb
     green "\nsing-box 卸载完成\n"
