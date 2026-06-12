@@ -51,21 +51,13 @@ check_argo()    { check_service "argo"     "${work_dir}/argo"; }
 
 # ── 包安装 ────────────────────────────────────────
 install_packages() {
-    local to_install=()
+    apt-get update -y
     for pkg in "$@"; do
         command_exists "$pkg" && { yellow "${pkg} 已安装，跳过"; continue; }
-        to_install+=("$pkg")
-    done
-    if [ ${#to_install[@]} -eq 0 ]; then
-        return 0
-    fi
-    apt-get update -y
-    for pkg in "${to_install[@]}"; do
         yellow "正在安装 ${pkg}…"
         apt-get install -y "$pkg" || { red "${pkg} 安装失败"; return 1; }
     done
 }
-
 
 # ── 防火墙放行 ────────────────────────────────────
 allow_port() {
@@ -499,10 +491,17 @@ get_info() {
     local argodomain=""
     is_fixed_tunnel_configured && argodomain=$(get_fixed_domain)
 
+    local fp_loon
+    fp_loon=$(echo "$fingerprint" | sed 's/%3A//gi' | tr '[:upper:]' '[:lower:]')
+
     if [ -z "$argodomain" ]; then
         yellow "未检测到固定隧道域名，VLESS 节点暂不可用，请先配置 Argo 固定隧道\n"
         cat > "${client_dir}" << EOF
 hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+EOF
+        cat > "${work_dir}/loon.txt" << EOF
+[Proxy]
+${node_prefix} hy2 = Hysteria2, ${server_ip}, ${hy2_port}, password=${uuid}, tls=true, sni=bing.com, alpn=h3, tls-cert-sha256=${fp_loon}, fast-open=true, udp=true, block-quic=true, download-bandwidth=200
 EOF
     else
         green "\nArgo 域名：${argodomain}\n"
@@ -521,6 +520,11 @@ vless://${uuid}@${CFIP}:${_port}?encryption=none&security=tls&sni=${argodomain}&
 
 hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
+        cat > "${work_dir}/loon.txt" << EOF
+[Proxy]
+${node_prefix} argo = VLESS, ${CFIP}, ${_port}, over-tls=true, username=${uuid}, transport=ws, path=/${vless_path}, host=${argodomain}, sni=${argodomain}, skip-cert-verify=false, udp=true
+${node_prefix} hy2 = Hysteria2, ${server_ip}, ${hy2_port}, password=${uuid}, tls=true, sni=bing.com, alpn=h3, tls-cert-sha256=${fp_loon}, fast-open=true, udp=true, block-quic=true, download-bandwidth=200
+EOF
     fi
 
     echo ""
@@ -528,6 +532,8 @@ EOF
         [ -z "$line" ] && continue
         echo -e "\e[1;35m${line}\033[0m"
     done < "${client_dir}"
+    echo ""
+    yellow "Loon 格式已保存至 ${work_dir}/loon.txt"
 }
 
 # ── 查看节点 ──────────────────────────────────────
@@ -947,9 +953,6 @@ uninstall_singbox() {
     systemctl disable sing-box argo 2>/dev/null
     systemctl daemon-reload
     rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
-    hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
-        "${conf_dir}/inbounds.json" 2>/dev/null)
-    [ -n "$hy2_port" ] && remove_port "${hy2_port}/udp"
     rm -rf "${work_dir}"
     rm -f /usr/bin/sb
     green "\nsing-box 卸载完成\n"
@@ -1051,9 +1054,6 @@ case "$1" in
         systemctl disable sing-box argo 2>/dev/null
         systemctl daemon-reload
         rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
-        hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
-            "${conf_dir}/inbounds.json" 2>/dev/null)
-        [ -n "$hy2_port" ] && remove_port "${hy2_port}/udp"
         rm -rf "${work_dir}"
         rm -f /usr/bin/sb
         green "\nsing-box 卸载完成\n"
