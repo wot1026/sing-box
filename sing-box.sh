@@ -508,7 +508,7 @@ hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprin
 EOF
         cat > "${work_dir}/loon.txt" << EOF
 [Proxy]
-${node_prefix} hy2 = Hysteria2, ${server_ip}, ${hy2_port}, password=${uuid}, tls=true, sni=bing.com, alpn=h3, tls-cert-sha256=${fp_loon}, fast-open=true, udp=true, block-quic=true, download-bandwidth=200
+${node_prefix} hy2 = Hysteria2,${server_ip},${hy2_port},"${uuid}",sni=bing.com,tls-cert-sha256=${fp_loon},fast-open=true,udp=true,block-quic=true,download-bandwidth=200
 EOF
     else
         green "\nArgo 域名：${argodomain}\n"
@@ -529,8 +529,8 @@ hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprin
 EOF
         cat > "${work_dir}/loon.txt" << EOF
 [Proxy]
-${node_prefix} argo = VLESS, ${CFIP}, ${_port}, "${uuid}", , transport=ws, path=/${vless_path}, host=${argodomain}, over-tls=true, tls-name=${argodomain}, skip-cert-verify=false, udp=true
-${node_prefix} hy2 = Hysteria2, ${server_ip}, ${hy2_port}, password=${uuid}, tls=true, sni=bing.com, alpn=h3, tls-cert-sha256=${fp_loon}, fast-open=true, udp=true, block-quic=true, download-bandwidth=200
+${node_prefix} argo = VLESS,${CFIP},${_port},"${uuid}",,transport=ws,path=/${vless_path},host=${argodomain},over-tls=true,tls-name=${argodomain},skip-cert-verify=false,udp=true
+${node_prefix} hy2 = Hysteria2,${server_ip},${hy2_port},"${uuid}",sni=bing.com,tls-cert-sha256=${fp_loon},fast-open=true,udp=true,block-quic=true,download-bandwidth=200
 EOF
     fi
 
