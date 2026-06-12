@@ -498,17 +498,10 @@ get_info() {
     local argodomain=""
     is_fixed_tunnel_configured && argodomain=$(get_fixed_domain)
 
-    local fp_loon
-    fp_loon=$(echo "$fingerprint" | sed 's/%3A//gi' | tr '[:upper:]' '[:lower:]')
-
     if [ -z "$argodomain" ]; then
         yellow "未检测到固定隧道域名，VLESS 节点暂不可用，请先配置 Argo 固定隧道\n"
         cat > "${client_dir}" << EOF
 hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
-EOF
-        cat > "${work_dir}/loon.txt" << EOF
-[Proxy]
-${node_prefix} hy2 = Hysteria2,${server_ip},${hy2_port},"${uuid}",skip-cert-verify=false,sni=bing.com,tls-cert-sha256=${fp_loon},udp=true,fast-open=true
 EOF
     else
         green "\nArgo 域名：${argodomain}\n"
@@ -527,25 +520,13 @@ vless://${uuid}@${CFIP}:${_port}?encryption=none&security=tls&sni=${argodomain}&
 
 hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
-        cat > "${work_dir}/loon.txt" << EOF
-[Proxy]
-${node_prefix} argo = VLESS,${CFIP},${_port},"${uuid}",transport=ws,path=/${vless_path},host=${argodomain},over-tls=true,sni=${argodomain},skip-cert-verify=false,udp=true
-${node_prefix} hy2 = Hysteria2,${server_ip},${hy2_port},"${uuid}",skip-cert-verify=false,sni=bing.com,tls-cert-sha256=${fp_loon},udp=true,fast-open=true
-EOF
     fi
 
     echo ""
-    skyblue "─── 通用（Shadowrocket / Egern / v2rayN）───"
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         echo -e "\e[1;35m${line}\033[0m"
     done < "${client_dir}"
-    echo ""
-    skyblue "─── Loon ───────────────────────────────────"
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        echo -e "\e[1;36m${line}\033[0m"
-    done < "${work_dir}/loon.txt"
 }
 
 # ── 查看节点 ──────────────────────────────────────
