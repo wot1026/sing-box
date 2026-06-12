@@ -535,12 +535,13 @@ EOF
     fi
 
     echo ""
+    skyblue "─── 通用（Shadowrocket / Egern / v2rayN）───"
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         echo -e "\e[1;35m${line}\033[0m"
     done < "${client_dir}"
     echo ""
-    yellow "Loon 格式已保存至 ${work_dir}/loon.txt\n"
+    skyblue "─── Loon ───────────────────────────────────"
     while IFS= read -r line; do
         [ -z "$line" ] && continue
         echo -e "\e[1;36m${line}\033[0m"
