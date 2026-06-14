@@ -254,6 +254,7 @@ install_singbox() {
     local restore_backup=false
     if [ -f "${backup_dir}/inbounds.json" ]; then
         yellow "\n检测到上次卸载时保留的节点配置备份"
+        local restore_choice
         reading "是否恢复备份中的 UUID / 端口 / 隧道配置？(y/n，回车默认 y): " restore_choice
         if [[ -z "$restore_choice" || "$restore_choice" == [yY] ]]; then
             restore_backup=true
@@ -277,7 +278,7 @@ install_singbox() {
             # 端口被占用则放弃该项恢复，重新挑选
             if ss -ulnH | awk '{print $5}' | grep -q ":${hy2_port}$"; then
                 yellow "备份中的 Hysteria2 端口 ${hy2_port} 已被占用，将重新分配"
-                hy2_port=$(pick_free_udp_port)
+                hy2_port=$(pick_free_udp_port) || exit 1
             fi
             if ss -tlnH | awk '{print $5}' | grep -q ":${argo_port}$"; then
                 yellow "备份中的 VLESS-Argo 端口 ${argo_port} 已被占用，将使用默认端口 ${ARGO_PORT}"
@@ -288,7 +289,7 @@ install_singbox() {
     fi
 
     if ! $restore_backup; then
-        hy2_port=$(pick_free_udp_port)
+        hy2_port=$(pick_free_udp_port) || exit 1
         uuid=$(cat /proc/sys/kernel/random/uuid)
         vless_path="/${uuid}-vless"
     fi
@@ -778,6 +779,7 @@ change_config() {
                     red "端口 ${new_port} 已被占用，请换一个"; sleep 1; return
                 fi
             fi
+            local old_port
             old_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "$inbounds_file")
             local tmp_file
             tmp_file=$(mktemp)
@@ -920,9 +922,10 @@ upgrade_singbox() {
 # ── 配置固定 Argo 隧道 ────────────────────────────
 configure_fixed_tunnel() {
     clear
-    yellow "\n固定隧道支持 JSON 凭据或 Token 两种方式，VLESS 端口: ${ARGO_PORT}"
+    yellow "\n固定隧道支持 JSON 凭据或 Token 两种方式"
     yellow "JSON 获取：https://fscarmen.cloudflare.now.cc\n"
 
+    local argo_domain argo_auth
     reading "\n请输入 Argo 域名: " argo_domain
     [ -z "$argo_domain" ] && { red "域名不能为空"; return 1; }
 
@@ -933,9 +936,11 @@ configure_fixed_tunnel() {
     reading "\n请输入 Argo 密钥（Token 或 JSON）: " argo_auth
     [ -z "$argo_auth" ] && { red "密钥不能为空"; return 1; }
 
+    # 问题C修复：先读取实际运行端口，再提示，避免与用户修改后的端口不一致
     local current_argo_port
     current_argo_port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "${conf_dir}/inbounds.json" 2>/dev/null)
     [[ "$current_argo_port" =~ ^[0-9]+$ ]] || current_argo_port="${ARGO_PORT}"
+    yellow "当前 VLESS 端口: ${current_argo_port}\n"
 
     if [[ "$argo_auth" =~ TunnelSecret ]]; then
         echo "$argo_auth" > "${work_dir}/tunnel.json"
