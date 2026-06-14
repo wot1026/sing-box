@@ -497,7 +497,7 @@ _rebuild_argo_service_from_tunnel_yml() {
         argo_domain=$(get_fixed_domain)
         yellow "检测到 Token 模式的隧道备份，域名：${argo_domain}"
         yellow "Token 信息卸载时不会保存，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
-        # Token 模式：tunnel.yml 存在但 Token 未保存，隧道实际不可用，保持 false
+        TUNNEL_TOKEN_MODE=true
         return
     fi
 
@@ -648,6 +648,7 @@ cn_block_manage() {
     [ $? -eq 2 ] && { yellow "sing-box 尚未安装！"; sleep 1; return; }
 
     local route_file="${conf_dir}/route.json"
+    jq empty "$route_file" 2>/dev/null || { red "route.json 格式异常，请检查文件内容"; sleep 2; return 1; }
     local block_enabled=false
     jq -e '.route.rules[] | select(.rule_set[]? == "geosite-cn")' \
         "$route_file" >/dev/null 2>&1 && block_enabled=true
@@ -1192,6 +1193,7 @@ do_install() {
     # 问题10修复：在顶层明确初始化，不依赖函数内部赋值顺序
     TUNNEL_FULLY_RESTORED=false
     BACKUP_SUCCESS=false
+    TUNNEL_TOKEN_MODE=false
 
     install_packages jq openssl curl
 
@@ -1220,14 +1222,14 @@ do_install() {
 
     green "\nsing-box 安装完成！"
 
-    # 问题7/8修复：统一在此处根据 TUNNEL_FULLY_RESTORED 输出隧道恢复状态，
-    # 此时 setup_services 已执行完毕，标记值已确定，单一真相来源
     if is_fixed_tunnel_configured && [ "${TUNNEL_FULLY_RESTORED}" = true ]; then
         green "Argo 固定隧道已完整恢复"
         get_info
+    elif is_fixed_tunnel_configured && [ "${TUNNEL_TOKEN_MODE}" = true ]; then
+        yellow "检测到 Token 模式隧道备份，域名：$(get_fixed_domain)"
+        yellow "请进入 Argo 隧道管理 → 配置固定隧道，重新输入 Token 后用 sb -c 查看节点\n"
     elif is_fixed_tunnel_configured; then
-        yellow "隧道配置文件存在但未完整恢复，节点暂不可用"
-        yellow "请进入 Argo 隧道管理 重新配置固定隧道，再用 sb -c 查看节点\n"
+        yellow "隧道配置文件存在但缺少凭据，请重新配置固定隧道\n"
     else
         yellow "请进入 Argo 隧道管理 配置固定隧道，再用 sb -c 查看节点\n"
     fi
