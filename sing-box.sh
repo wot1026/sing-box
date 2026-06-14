@@ -290,13 +290,10 @@ install_singbox() {
     if ! $restore_backup; then
         hy2_port=$(pick_free_udp_port)
         uuid=$(cat /proc/sys/kernel/random/uuid)
-        # vless ws path 使用 uuid 前缀，更隐蔽
         vless_path="/${uuid}-vless"
     fi
 
     # ── 在确定最终 argo_port 后再检查端口占用 ──────
-    # （恢复备份场景下 argo_port 可能与 ARGO_PORT 不同，
-    #   不能在恢复逻辑之前就用默认 ARGO_PORT 提前判定）
     if ss -tlnH | awk '{print $5}' | grep -q ":${argo_port}$"; then
         red "端口 ${argo_port} 已被占用，请修改 ARGO_PORT 后重试，或在卸载备份中清理冲突配置"
         exit 1
@@ -343,9 +340,6 @@ EOF
 }
 EOF
 
-    # ── 关键改动：vmess → vless ──────────────────
-    # vless+ws 不需要 tls（由 Argo 隧道负责终结），
-    # 因此 inbound 里不加 tls 块，保持 listen 在 127.0.0.1
     cat > "${conf_dir}/inbounds.json" << EOF
 {
   "inbounds": [
@@ -421,7 +415,6 @@ EOF
     if $restore_backup; then
         if [ -f "${backup_dir}/tunnel.yml" ]; then
             cp "${backup_dir}/tunnel.yml" "${work_dir}/tunnel.yml"
-            # 隧道里的端口若被重新分配，需同步更新
             sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${argo_port}|" \
                 "${work_dir}/tunnel.yml"
         fi
@@ -435,12 +428,9 @@ EOF
         fi
     fi
 
+    # 问题7/8修复：install_singbox 只报告核心安装结果，
+    # 不在此处对隧道恢复状态下结论（TUNNEL_FULLY_RESTORED 尚未确定）
     green "sing-box 核心安装完成"
-    if $restore_backup && [ -f "${work_dir}/tunnel.yml" ]; then
-        green "已恢复 Argo 固定隧道配置"
-    else
-        yellow "注意：需在 Argo 隧道管理 中配置固定隧道后，VLESS 节点才可用"
-    fi
 }
 
 # ── systemd 服务 ──────────────────────────────────
@@ -487,8 +477,9 @@ EOF
     systemctl enable sing-box && systemctl start sing-box
     systemctl enable argo
 
-    # 若恢复了固定隧道配置，需要把上面写的占位 argo.service 替换为真实配置
+    # 问题10修复：在此处统一初始化，确保无论哪条路径都有明确值
     TUNNEL_FULLY_RESTORED=false
+
     if [ -f "${work_dir}/tunnel.yml" ]; then
         _rebuild_argo_service_from_tunnel_yml
         systemctl daemon-reload
@@ -497,16 +488,15 @@ EOF
 }
 
 # ── 根据 tunnel.yml 重建 argo.service（用于恢复备份场景）──
-# 设置全局变量 TUNNEL_FULLY_RESTORED=true/false，
-# 供 do_install 判断是否可以直接展示节点信息
 _rebuild_argo_service_from_tunnel_yml() {
-    TUNNEL_FULLY_RESTORED=false
+    # TUNNEL_FULLY_RESTORED 由调用方 setup_services 已初始化为 false，此处不重置
 
     if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
         local argo_domain
         argo_domain=$(get_fixed_domain)
         yellow "检测到 Token 模式的隧道备份，域名：${argo_domain}"
         yellow "Token 信息卸载时不会保存，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
+        # Token 模式：tunnel.yml 存在但 Token 未保存，隧道实际不可用，保持 false
         return
     fi
 
@@ -531,6 +521,7 @@ EOF
     else
         yellow "tunnel.yml 已恢复但缺少 tunnel.json 凭据文件，隧道无法启动"
         yellow "请重新执行「Argo 隧道管理 → 配置固定隧道」"
+        # tunnel.json 缺失，保持 false
     fi
 }
 
@@ -580,6 +571,8 @@ get_info() {
     [ -z "$server_ip" ] && { red "获取 IP 失败"; return 1; }
     node_prefix=$(get_node_name)
 
+    # 问题14修复：get_info 作为唯一从文件读取 CF 配置的地方，
+    # change_config 选项4写完文件后不再手动更新全局变量，统一由此处加载
     if [ -f "${work_dir}/cf.env" ]; then
         local _cfip _cfport
         _cfip=$(grep  '^CFIP='   "${work_dir}/cf.env" | cut -d'=' -f2-)
@@ -592,7 +585,6 @@ get_info() {
 
     local hy2_port uuid fingerprint
     hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${conf_dir}/inbounds.json")
-    # ── 关键改动：select type 改为 vless ──────────
     uuid=$(jq -r '.inbounds[] | select(.type=="vless") | .users[0].uuid' "${conf_dir}/inbounds.json")
 
     fingerprint=$(get_hy2_fingerprint)
@@ -601,7 +593,6 @@ get_info() {
         return 1
     fi
 
-    # ── 从 inbounds.json 读取 vless ws path ──────
     local vless_path
     vless_path=$(jq -r '.inbounds[] | select(.type=="vless") | .transport.path' "${conf_dir}/inbounds.json" \
         | sed 's|^/||')
@@ -620,9 +611,6 @@ EOF
         local _port="${CFPORT:-443}"
         [[ "$_port" =~ ^[0-9]+$ ]] || _port="443"
 
-        # ── 关键改动：生成 vless URI（无需 base64）─
-        # path 含 ?ed=2560，需先对 / 和 ? 做 URL 编码
-        # 实际编码：/path?ed=2560 → %2Fpath%3Fed%3D2560
         local encoded_path
         encoded_path="%2F${vless_path}%3Fed%3D2560"
 
@@ -763,8 +751,6 @@ change_config() {
 
             local tmp_file
             tmp_file=$(mktemp)
-
-            # 合并 jq 操作：一次性完成 UUID 和 VLESS Path 的修改，避免配置产生不一致
             jq --arg u "$new_uuid" --arg p "/${new_uuid}-vless" '
                 (.inbounds[] | select(.type=="vless")     | .users[] | .uuid)     = $u |
                 (.inbounds[] | select(.type=="vless")     | .transport.path)      = $p |
@@ -807,6 +793,7 @@ change_config() {
             restart_singbox && get_info
             green "\nHysteria2 端口已修改为：${new_port}\n"
             ;;
+
         3)
             reading "\n请输入新的 VLESS-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(pick_free_tcp_port)
@@ -818,7 +805,6 @@ change_config() {
             fi
             local tmp_file
             tmp_file=$(mktemp)
-            # ── 关键改动：select type 改为 vless ──
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vless") | .listen_port) = $p' \
                 "$inbounds_file" > "$tmp_file"
@@ -826,16 +812,19 @@ change_config() {
                 rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
             fi
             mv "$tmp_file" "$inbounds_file"
+            # 问题11修复：先判断模式，Token 模式跳过 sed（tunnel.yml 无 service 行）
             if [ -f "${work_dir}/tunnel.yml" ]; then
-                sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
-                    "${work_dir}/tunnel.yml"
-            fi
-            if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
-                yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
+                if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
+                    yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
+                else
+                    sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
+                        "${work_dir}/tunnel.yml"
+                fi
             fi
             restart_singbox && restart_argo && get_info
             green "\nVLESS-Argo 端口已修改为：${new_port}\n"
             ;;
+
         4)
             clear
             green "1: ct.877774.xyz  2: cf.877774.xyz  3: cf.877771.xyz  4: cdns.doon.eu.org\n"
@@ -857,10 +846,12 @@ change_config() {
             esac
             printf 'CFIP=%s\nCFPORT=%s\n' "$cfip" "$cfport" > "${work_dir}/cf.env"
             chmod 600 "${work_dir}/cf.env"
-            CFIP="$cfip"; CFPORT="$cfport"
+            # 问题14修复：写完文件后不再手动更新全局变量，
+            # get_info 会统一从 cf.env 加载，此处直接调用即可
             get_info
             green "\nCF 优选已更新为：${cfip}:${cfport}\n"
             ;;
+
         0) return ;;
         *) red "无效选项！" ;;
     esac
@@ -942,7 +933,6 @@ configure_fixed_tunnel() {
     reading "\n请输入 Argo 密钥（Token 或 JSON）: " argo_auth
     [ -z "$argo_auth" ] && { red "密钥不能为空"; return 1; }
 
-    # 当前实际使用的 vless inbound 端口（可能因恢复备份而非默认 ARGO_PORT）
     local current_argo_port
     current_argo_port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "${conf_dir}/inbounds.json" 2>/dev/null)
     [[ "$current_argo_port" =~ ^[0-9]+$ ]] || current_argo_port="${ARGO_PORT}"
@@ -986,7 +976,8 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
-    elif [[ "$argo_auth" =~ ^[A-Za-z0-9._-]{100,500}$ ]]; then
+    # 问题12修复：Token 字符集改为 base64url（A-Za-z0-9+/=-_），去掉不合法的 '.'
+    elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=_-]{100,500}$ ]]; then
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
 
         cat > /etc/systemd/system/argo.service << EOF
@@ -1064,10 +1055,11 @@ manage_singbox() {
 }
 
 # ── 卸载核心逻辑（共享） ──────────────────────────
-# keep_config=true 时：卸载前把节点配置（uuid/端口/隧道/CF优选）
-# 备份到 work_dir 之外的 backup_dir，供下次安装时恢复
 _do_uninstall_core() {
     local keep_config="${1:-false}"
+    # 问题13修复：用独立变量追踪备份是否真正成功，
+    # 供调用方（uninstall_singbox）决定最终打印什么提示
+    BACKUP_SUCCESS=false
 
     if [ "$keep_config" = true ]; then
         yellow "正在备份节点配置以便重装时恢复…"
@@ -1083,8 +1075,10 @@ _do_uninstall_core() {
 
         if [ -s "${backup_dir}/inbounds.json" ]; then
             green "节点配置已备份至 ${backup_dir}，重装时将自动检测并询问是否恢复"
+            BACKUP_SUCCESS=true
         else
             red "备份失败（未找到 inbounds.json），将按未保留配置继续卸载"
+            rm -rf "$backup_dir" 2>/dev/null
         fi
     else
         rm -rf "$backup_dir" 2>/dev/null
@@ -1120,7 +1114,9 @@ uninstall_singbox() {
     yellow "正在卸载…"
     _do_uninstall_core "$keep_config"
 
-    if $keep_config; then
+    # 问题13修复：根据 BACKUP_SUCCESS 而非 keep_config 决定最终提示，
+    # 避免备份失败时仍打印"节点配置已保留"
+    if $keep_config && [ "${BACKUP_SUCCESS:-false}" = true ]; then
         green "\nsing-box 卸载完成，节点配置已保留，下次安装时可选择恢复\n"
     else
         green "\nsing-box 卸载完成\n"
@@ -1188,6 +1184,10 @@ menu() {
 
 # ── 安装流程 ──────────────────────────────────────
 do_install() {
+    # 问题10修复：在顶层明确初始化，不依赖函数内部赋值顺序
+    TUNNEL_FULLY_RESTORED=false
+    BACKUP_SUCCESS=false
+
     install_packages jq openssl curl
 
     yellow "正在查询 sing-box 最新版本…"
@@ -1205,11 +1205,20 @@ do_install() {
     sleep 2
     create_shortcut
 
-    # 安装完成后，备份已用于恢复，清理之
-    [ -d "$backup_dir" ] && rm -rf "$backup_dir"
+    # 问题9修复：确认 inbounds.json 已落盘后再清理备份，
+    # 避免中途失败时备份被提前删除
+    if [ -s "${conf_dir}/inbounds.json" ]; then
+        [ -d "$backup_dir" ] && rm -rf "$backup_dir"
+    else
+        yellow "警告：inbounds.json 未落盘，保留备份目录以供重试"
+    fi
 
     green "\nsing-box 安装完成！"
-    if is_fixed_tunnel_configured && [ "${TUNNEL_FULLY_RESTORED:-false}" = true ]; then
+
+    # 问题7/8修复：统一在此处根据 TUNNEL_FULLY_RESTORED 输出隧道恢复状态，
+    # 此时 setup_services 已执行完毕，标记值已确定，单一真相来源
+    if is_fixed_tunnel_configured && [ "${TUNNEL_FULLY_RESTORED}" = true ]; then
+        green "Argo 固定隧道已完整恢复"
         get_info
     elif is_fixed_tunnel_configured; then
         yellow "隧道配置文件存在但未完整恢复，节点暂不可用"
