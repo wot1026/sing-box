@@ -232,11 +232,6 @@ install_singbox() {
 
     local sb_ver="${1:-$SB_VERSION}"
 
-    if ss -tlnH | awk '{print $5}' | grep -q ":${ARGO_PORT}$"; then
-        red "端口 ${ARGO_PORT} 已被占用，请修改 ARGO_PORT 后重试"
-        exit 1
-    fi
-
     local arch_raw arch
     arch_raw=$(uname -m)
     case "$arch_raw" in
@@ -297,6 +292,14 @@ install_singbox() {
         uuid=$(cat /proc/sys/kernel/random/uuid)
         # vless ws path 使用 uuid 前缀，更隐蔽
         vless_path="/${uuid}-vless"
+    fi
+
+    # ── 在确定最终 argo_port 后再检查端口占用 ──────
+    # （恢复备份场景下 argo_port 可能与 ARGO_PORT 不同，
+    #   不能在恢复逻辑之前就用默认 ARGO_PORT 提前判定）
+    if ss -tlnH | awk '{print $5}' | grep -q ":${argo_port}$"; then
+        red "端口 ${argo_port} 已被占用，请修改 ARGO_PORT 后重试，或在卸载备份中清理冲突配置"
+        exit 1
     fi
 
     allow_port "${hy2_port}/udp"
@@ -485,6 +488,7 @@ EOF
     systemctl enable argo
 
     # 若恢复了固定隧道配置，需要把上面写的占位 argo.service 替换为真实配置
+    TUNNEL_FULLY_RESTORED=false
     if [ -f "${work_dir}/tunnel.yml" ]; then
         _rebuild_argo_service_from_tunnel_yml
         systemctl daemon-reload
@@ -493,9 +497,13 @@ EOF
 }
 
 # ── 根据 tunnel.yml 重建 argo.service（用于恢复备份场景）──
+# 设置全局变量 TUNNEL_FULLY_RESTORED=true/false，
+# 供 do_install 判断是否可以直接展示节点信息
 _rebuild_argo_service_from_tunnel_yml() {
+    TUNNEL_FULLY_RESTORED=false
+
     if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
-        local argo_domain argo_token
+        local argo_domain
         argo_domain=$(get_fixed_domain)
         yellow "检测到 Token 模式的隧道备份，域名：${argo_domain}"
         yellow "Token 信息卸载时不会保存，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
@@ -519,6 +527,10 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOF
+        TUNNEL_FULLY_RESTORED=true
+    else
+        yellow "tunnel.yml 已恢复但缺少 tunnel.json 凭据文件，隧道无法启动"
+        yellow "请重新执行「Argo 隧道管理 → 配置固定隧道」"
     fi
 }
 
@@ -1060,6 +1072,7 @@ _do_uninstall_core() {
     if [ "$keep_config" = true ]; then
         yellow "正在备份节点配置以便重装时恢复…"
         mkdir -p "$backup_dir"
+        chmod 700 "$backup_dir"
         rm -f "${backup_dir}"/* 2>/dev/null
 
         [ -f "${conf_dir}/inbounds.json" ] && cp "${conf_dir}/inbounds.json" "${backup_dir}/inbounds.json"
@@ -1196,8 +1209,11 @@ do_install() {
     [ -d "$backup_dir" ] && rm -rf "$backup_dir"
 
     green "\nsing-box 安装完成！"
-    if is_fixed_tunnel_configured; then
+    if is_fixed_tunnel_configured && [ "${TUNNEL_FULLY_RESTORED:-false}" = true ]; then
         get_info
+    elif is_fixed_tunnel_configured; then
+        yellow "隧道配置文件存在但未完整恢复，节点暂不可用"
+        yellow "请进入 Argo 隧道管理 重新配置固定隧道，再用 sb -c 查看节点\n"
     else
         yellow "请进入 Argo 隧道管理 配置固定隧道，再用 sb -c 查看节点\n"
     fi
