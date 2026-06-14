@@ -1,15 +1,15 @@
+#!/usr/bin/env bash
 # =========================
 # 自用 sing-box 安装脚本
 # 协议: vless-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.12 11:00
+# 最后更新时间: 2026.6.14 12:00
 # =========================
 
 export LANG=en_US.UTF-8
 export DEBIAN_FRONTEND=noninteractive
 
 # ── 颜色 ──────────────────────────────────────────
-re="\033[0m"
 red()    { echo -e "\e[1;91m$1\033[0m"; }
 green()  { echo -e "\e[1;32m$1\033[0m"; }
 yellow() { echo -e "\e[1;33m$1\033[0m"; }
@@ -21,6 +21,7 @@ reading(){ read -p "$(red "$1")" "$2"; }
 work_dir="/etc/sing-box"
 conf_dir="${work_dir}/conf"
 client_dir="${work_dir}/url.txt"
+backup_dir="/etc/sing-box-backup"
 SCRIPT_URL="https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/sing-box.sh"
 ARGO_PORT="8001"
 
@@ -78,12 +79,10 @@ allow_port() {
     if [ $has_iptables -eq 1 ]; then
         iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         iptables -C INPUT -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        iptables -C INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
     fi
     if [ $has_ip6tables -eq 1 ]; then
         ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || ip6tables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         ip6tables -C INPUT -p icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        ip6tables -C INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || ip6tables -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
     fi
 
     for rule in "$@"; do
@@ -254,12 +253,51 @@ install_singbox() {
 
     apt-get install -y qrencode 2>/dev/null || yellow "qrencode 安装失败，二维码功能不可用"
 
-    local hy2_port uuid
-    hy2_port=$(pick_free_udp_port)
-    uuid=$(cat /proc/sys/kernel/random/uuid)
+    local hy2_port uuid vless_path argo_port="${ARGO_PORT}"
 
-    # vless ws path 使用 uuid 前缀，更隐蔽
-    local vless_path="${uuid}-vless"
+    # ── 检测是否存在卸载时保留的备份配置 ──────────
+    local restore_backup=false
+    if [ -f "${backup_dir}/inbounds.json" ]; then
+        yellow "\n检测到上次卸载时保留的节点配置备份"
+        reading "是否恢复备份中的 UUID / 端口 / 隧道配置？(y/n，回车默认 y): " restore_choice
+        if [[ -z "$restore_choice" || "$restore_choice" == [yY] ]]; then
+            restore_backup=true
+        fi
+    fi
+
+    if $restore_backup; then
+        uuid=$(jq -r '.inbounds[] | select(.type=="vless") | .users[0].uuid' "${backup_dir}/inbounds.json")
+        vless_path=$(jq -r '.inbounds[] | select(.type=="vless") | .transport.path' "${backup_dir}/inbounds.json")
+        hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${backup_dir}/inbounds.json")
+        argo_port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "${backup_dir}/inbounds.json")
+
+        # 校验恢复出来的值，任何一项异常则放弃恢复，改用全新生成
+        if [ -z "$uuid" ] || [ "$uuid" = "null" ] \
+           || [ -z "$vless_path" ] || [ "$vless_path" = "null" ] \
+           || ! [[ "$hy2_port" =~ ^[0-9]+$ ]] \
+           || ! [[ "$argo_port" =~ ^[0-9]+$ ]]; then
+            yellow "备份配置内容异常，已忽略备份，将生成全新配置"
+            restore_backup=false
+        else
+            # 端口被占用则放弃该项恢复，重新挑选
+            if ss -ulnH | awk '{print $5}' | grep -q ":${hy2_port}$"; then
+                yellow "备份中的 Hysteria2 端口 ${hy2_port} 已被占用，将重新分配"
+                hy2_port=$(pick_free_udp_port)
+            fi
+            if ss -tlnH | awk '{print $5}' | grep -q ":${argo_port}$"; then
+                yellow "备份中的 VLESS-Argo 端口 ${argo_port} 已被占用，将使用默认端口 ${ARGO_PORT}"
+                argo_port="${ARGO_PORT}"
+            fi
+            green "已从备份恢复 UUID 与端口配置"
+        fi
+    fi
+
+    if ! $restore_backup; then
+        hy2_port=$(pick_free_udp_port)
+        uuid=$(cat /proc/sys/kernel/random/uuid)
+        # vless ws path 使用 uuid 前缀，更隐蔽
+        vless_path="/${uuid}-vless"
+    fi
 
     allow_port "${hy2_port}/udp"
 
@@ -312,7 +350,7 @@ EOF
       "type": "vless",
       "tag": "vless-ws",
       "listen": "127.0.0.1",
-      "listen_port": ${ARGO_PORT},
+      "listen_port": ${argo_port},
       "users": [
         {
           "uuid": "${uuid}"
@@ -320,7 +358,7 @@ EOF
       ],
       "transport": {
         "type": "ws",
-        "path": "/${vless_path}",
+        "path": "${vless_path}",
         "max_early_data": 2560,
         "early_data_header_name": "Sec-WebSocket-Protocol"
       }
@@ -376,8 +414,30 @@ EOF
 }
 EOF
 
+    # ── 恢复 Argo 隧道与 CF 优选配置（若有备份）──
+    if $restore_backup; then
+        if [ -f "${backup_dir}/tunnel.yml" ]; then
+            cp "${backup_dir}/tunnel.yml" "${work_dir}/tunnel.yml"
+            # 隧道里的端口若被重新分配，需同步更新
+            sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${argo_port}|" \
+                "${work_dir}/tunnel.yml"
+        fi
+        if [ -f "${backup_dir}/tunnel.json" ]; then
+            cp "${backup_dir}/tunnel.json" "${work_dir}/tunnel.json"
+            chmod 600 "${work_dir}/tunnel.json"
+        fi
+        if [ -f "${backup_dir}/cf.env" ]; then
+            cp "${backup_dir}/cf.env" "${work_dir}/cf.env"
+            chmod 600 "${work_dir}/cf.env"
+        fi
+    fi
+
     green "sing-box 核心安装完成"
-    yellow "注意：需在 Argo 隧道管理 中配置固定隧道后，VLESS 节点才可用"
+    if $restore_backup && [ -f "${work_dir}/tunnel.yml" ]; then
+        green "已恢复 Argo 固定隧道配置"
+    else
+        yellow "注意：需在 Argo 隧道管理 中配置固定隧道后，VLESS 节点才可用"
+    fi
 }
 
 # ── systemd 服务 ──────────────────────────────────
@@ -423,6 +483,43 @@ EOF
     systemctl daemon-reload
     systemctl enable sing-box && systemctl start sing-box
     systemctl enable argo
+
+    # 若恢复了固定隧道配置，需要把上面写的占位 argo.service 替换为真实配置
+    if [ -f "${work_dir}/tunnel.yml" ]; then
+        _rebuild_argo_service_from_tunnel_yml
+        systemctl daemon-reload
+        systemctl restart argo
+    fi
+}
+
+# ── 根据 tunnel.yml 重建 argo.service（用于恢复备份场景）──
+_rebuild_argo_service_from_tunnel_yml() {
+    if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
+        local argo_domain argo_token
+        argo_domain=$(get_fixed_domain)
+        yellow "检测到 Token 模式的隧道备份，域名：${argo_domain}"
+        yellow "Token 信息卸载时不会保存，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
+        return
+    fi
+
+    if [ -f "${work_dir}/tunnel.json" ]; then
+        cat > /etc/systemd/system/argo.service << EOF
+[Unit]
+Description=Cloudflare Tunnel
+After=network.target
+
+[Service]
+Type=simple
+NoNewPrivileges=yes
+TimeoutStartSec=0
+ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --config ${work_dir}/tunnel.yml run
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
 }
 
 # ── 服务管理 ──────────────────────────────────────
@@ -590,8 +687,11 @@ cn_block_manage() {
                  "outbound":"direct"},
                 {"rule_set":["geosite-cn"],"outbound":"block"}
               ] + .route.rules
-            ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file"
-            [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
+            ' "$route_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 2; return
+            fi
+            mv "$tmp_file" "$route_file"
             restart_singbox
             green "\n大陆域名拦截已开启\n"
             ;;
@@ -608,8 +708,11 @@ cn_block_manage() {
                   (.domain_regex[] | test("googleapis"))
               )) |
               del(.route.rule_set[] | select(.tag == "geosite-cn"))
-            ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file"
-            [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
+            ' "$route_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 2; return
+            fi
+            mv "$tmp_file" "$route_file"
             restart_singbox
             green "\n大陆域名拦截已关闭\n"
             ;;
@@ -645,23 +748,22 @@ change_config() {
                ! [[ "$new_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
                 red "UUID 格式不合法"; sleep 1; return
             fi
-            
+
             local tmp_file
             tmp_file=$(mktemp)
-            
+
             # 合并 jq 操作：一次性完成 UUID 和 VLESS Path 的修改，避免配置产生不一致
             jq --arg u "$new_uuid" --arg p "/${new_uuid}-vless" '
                 (.inbounds[] | select(.type=="vless")     | .users[] | .uuid)     = $u |
                 (.inbounds[] | select(.type=="vless")     | .transport.path)      = $p |
                 (.inbounds[] | select(.type=="hysteria2") | .users[] | .password) = $u
-            ' "$inbounds_file" > "$tmp_file" && mv "$tmp_file" "$inbounds_file"
-            
-            if [ $? -ne 0 ]; then
-                red "配置文件写入失败，请检查！"
-                sleep 2
-                return
+            ' "$inbounds_file" > "$tmp_file"
+
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置文件写入失败，请检查！"; sleep 2; return
             fi
-            
+            mv "$tmp_file" "$inbounds_file"
+
             restart_singbox && get_info
             green "\nUUID 已修改为：${new_uuid}\n"
             ;;
@@ -683,9 +785,11 @@ change_config() {
             tmp_file=$(mktemp)
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="hysteria2") | .listen_port) = $p' \
-                "$inbounds_file" > "$tmp_file" \
-                && mv "$tmp_file" "$inbounds_file" \
-                || { red "配置写入失败"; sleep 1; return; }
+                "$inbounds_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
+            fi
+            mv "$tmp_file" "$inbounds_file"
             remove_port "${old_port}/udp"
             allow_port "${new_port}/udp"
             restart_singbox && get_info
@@ -705,8 +809,11 @@ change_config() {
             # ── 关键改动：select type 改为 vless ──
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vless") | .listen_port) = $p' \
-                "$inbounds_file" > "$tmp_file" \
-                && mv "$tmp_file" "$inbounds_file"
+                "$inbounds_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
+            fi
+            mv "$tmp_file" "$inbounds_file"
             if [ -f "${work_dir}/tunnel.yml" ]; then
                 sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
                     "${work_dir}/tunnel.yml"
@@ -823,6 +930,11 @@ configure_fixed_tunnel() {
     reading "\n请输入 Argo 密钥（Token 或 JSON）: " argo_auth
     [ -z "$argo_auth" ] && { red "密钥不能为空"; return 1; }
 
+    # 当前实际使用的 vless inbound 端口（可能因恢复备份而非默认 ARGO_PORT）
+    local current_argo_port
+    current_argo_port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "${conf_dir}/inbounds.json" 2>/dev/null)
+    [[ "$current_argo_port" =~ ^[0-9]+$ ]] || current_argo_port="${ARGO_PORT}"
+
     if [[ "$argo_auth" =~ TunnelSecret ]]; then
         echo "$argo_auth" > "${work_dir}/tunnel.json"
         chmod 600 "${work_dir}/tunnel.json"
@@ -839,7 +951,7 @@ protocol: http2
 
 ingress:
   - hostname: ${argo_domain}
-    service: http://localhost:${ARGO_PORT}
+    service: http://localhost:${current_argo_port}
     originRequest:
       noTLSVerify: true
   - service: http_status:404
@@ -939,22 +1051,67 @@ manage_singbox() {
     done
 }
 
-# ── 卸载 ──────────────────────────────────────────
-uninstall_singbox() {
-    reading "确定要卸载 sing-box 吗? (y/n): " choice
-    [[ "$choice" != [yY] ]] && { purple "已取消卸载\n"; return; }
-    yellow "正在卸载…"
+# ── 卸载核心逻辑（共享） ──────────────────────────
+# keep_config=true 时：卸载前把节点配置（uuid/端口/隧道/CF优选）
+# 备份到 work_dir 之外的 backup_dir，供下次安装时恢复
+_do_uninstall_core() {
+    local keep_config="${1:-false}"
+
+    if [ "$keep_config" = true ]; then
+        yellow "正在备份节点配置以便重装时恢复…"
+        mkdir -p "$backup_dir"
+        rm -f "${backup_dir}"/* 2>/dev/null
+
+        [ -f "${conf_dir}/inbounds.json" ] && cp "${conf_dir}/inbounds.json" "${backup_dir}/inbounds.json"
+        [ -f "${work_dir}/tunnel.yml" ]    && cp "${work_dir}/tunnel.yml"    "${backup_dir}/tunnel.yml"
+        [ -f "${work_dir}/tunnel.json" ]   && cp "${work_dir}/tunnel.json"   "${backup_dir}/tunnel.json"
+        [ -f "${work_dir}/cf.env" ]        && cp "${work_dir}/cf.env"        "${backup_dir}/cf.env"
+        chmod -R go-rwx "$backup_dir" 2>/dev/null
+
+        if [ -s "${backup_dir}/inbounds.json" ]; then
+            green "节点配置已备份至 ${backup_dir}，重装时将自动检测并询问是否恢复"
+        else
+            red "备份失败（未找到 inbounds.json），将按未保留配置继续卸载"
+        fi
+    else
+        rm -rf "$backup_dir" 2>/dev/null
+    fi
+
     systemctl stop    sing-box argo 2>/dev/null
     systemctl disable sing-box argo 2>/dev/null
     systemctl daemon-reload
     rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
+
     local hy2_port
     hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
         "${conf_dir}/inbounds.json" 2>/dev/null)
-    [ -n "$hy2_port" ] && remove_port "${hy2_port}/udp"
+    if [ -n "$hy2_port" ] && [ "$hy2_port" != "null" ]; then
+        remove_port "${hy2_port}/udp"
+    else
+        yellow "警告：无法读取 Hy2 端口，防火墙规则可能未清理，请手动检查 iptables\n"
+    fi
+
     rm -rf "${work_dir}"
     rm -f /usr/bin/sb
-    green "\nsing-box 卸载完成\n"
+}
+
+# ── 卸载（交互） ──────────────────────────────────
+uninstall_singbox() {
+    reading "确定要卸载 sing-box 吗? (y/n): " choice
+    [[ "$choice" != [yY] ]] && { purple "已取消卸载\n"; return; }
+
+    reading "是否保留节点配置（UUID/端口/隧道）以便重装时恢复？(y/n，回车默认 n): " keep_choice
+    local keep_config=false
+    [[ "$keep_choice" == [yY] ]] && keep_config=true
+
+    yellow "正在卸载…"
+    _do_uninstall_core "$keep_config"
+
+    if $keep_config; then
+        green "\nsing-box 卸载完成，节点配置已保留，下次安装时可选择恢复\n"
+    else
+        green "\nsing-box 卸载完成\n"
+    fi
     exit 0
 }
 
@@ -1034,8 +1191,16 @@ do_install() {
     setup_services
     sleep 2
     create_shortcut
+
+    # 安装完成后，备份已用于恢复，清理之
+    [ -d "$backup_dir" ] && rm -rf "$backup_dir"
+
     green "\nsing-box 安装完成！"
-    yellow "请进入 Argo 隧道管理 配置固定隧道，再用 sb -c 查看节点\n"
+    if is_fixed_tunnel_configured; then
+        get_info
+    else
+        yellow "请进入 Argo 隧道管理 配置固定隧道，再用 sb -c 查看节点\n"
+    fi
 }
 
 # ── 入口 ──────────────────────────────────────────
@@ -1049,15 +1214,7 @@ case "$1" in
         ;;
     -u|--uninstall)
         yellow "正在无交互卸载 sing-box…\n"
-        systemctl stop    sing-box argo 2>/dev/null
-        systemctl disable sing-box argo 2>/dev/null
-        systemctl daemon-reload
-        rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
-        hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
-            "${conf_dir}/inbounds.json" 2>/dev/null)
-        [ -n "$hy2_port" ] && remove_port "${hy2_port}/udp"
-        rm -rf "${work_dir}"
-        rm -f /usr/bin/sb
+        _do_uninstall_core false
         green "\nsing-box 卸载完成\n"
         ;;
     -c|--check)
