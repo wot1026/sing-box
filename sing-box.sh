@@ -1,15 +1,15 @@
+#!/usr/bin/env bash
 # =========================
 # 自用 sing-box 安装脚本
 # 协议: vless-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.12 11:00
+# 最后更新时间: 2026.6.14 00:00
 # =========================
 
 export LANG=en_US.UTF-8
 export DEBIAN_FRONTEND=noninteractive
 
 # ── 颜色 ──────────────────────────────────────────
-re="\033[0m"
 red()    { echo -e "\e[1;91m$1\033[0m"; }
 green()  { echo -e "\e[1;32m$1\033[0m"; }
 yellow() { echo -e "\e[1;33m$1\033[0m"; }
@@ -78,12 +78,10 @@ allow_port() {
     if [ $has_iptables -eq 1 ]; then
         iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         iptables -C INPUT -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        iptables -C INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
     fi
     if [ $has_ip6tables -eq 1 ]; then
         ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || ip6tables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
         ip6tables -C INPUT -p icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        ip6tables -C INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || ip6tables -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
     fi
 
     for rule in "$@"; do
@@ -590,8 +588,11 @@ cn_block_manage() {
                  "outbound":"direct"},
                 {"rule_set":["geosite-cn"],"outbound":"block"}
               ] + .route.rules
-            ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file"
-            [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
+            ' "$route_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 2; return
+            fi
+            mv "$tmp_file" "$route_file"
             restart_singbox
             green "\n大陆域名拦截已开启\n"
             ;;
@@ -608,8 +609,11 @@ cn_block_manage() {
                   (.domain_regex[] | test("googleapis"))
               )) |
               del(.route.rule_set[] | select(.tag == "geosite-cn"))
-            ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file"
-            [ $? -ne 0 ] && { red "配置写入失败"; sleep 2; return; }
+            ' "$route_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 2; return
+            fi
+            mv "$tmp_file" "$route_file"
             restart_singbox
             green "\n大陆域名拦截已关闭\n"
             ;;
@@ -654,13 +658,12 @@ change_config() {
                 (.inbounds[] | select(.type=="vless")     | .users[] | .uuid)     = $u |
                 (.inbounds[] | select(.type=="vless")     | .transport.path)      = $p |
                 (.inbounds[] | select(.type=="hysteria2") | .users[] | .password) = $u
-            ' "$inbounds_file" > "$tmp_file" && mv "$tmp_file" "$inbounds_file"
-            
-            if [ $? -ne 0 ]; then
-                red "配置文件写入失败，请检查！"
-                sleep 2
-                return
+            ' "$inbounds_file" > "$tmp_file"
+
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置文件写入失败，请检查！"; sleep 2; return
             fi
+            mv "$tmp_file" "$inbounds_file"
             
             restart_singbox && get_info
             green "\nUUID 已修改为：${new_uuid}\n"
@@ -683,9 +686,11 @@ change_config() {
             tmp_file=$(mktemp)
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="hysteria2") | .listen_port) = $p' \
-                "$inbounds_file" > "$tmp_file" \
-                && mv "$tmp_file" "$inbounds_file" \
-                || { red "配置写入失败"; sleep 1; return; }
+                "$inbounds_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
+            fi
+            mv "$tmp_file" "$inbounds_file"
             remove_port "${old_port}/udp"
             allow_port "${new_port}/udp"
             restart_singbox && get_info
@@ -705,8 +710,11 @@ change_config() {
             # ── 关键改动：select type 改为 vless ──
             jq --argjson p "$new_port" \
                 '(.inbounds[] | select(.type=="vless") | .listen_port) = $p' \
-                "$inbounds_file" > "$tmp_file" \
-                && mv "$tmp_file" "$inbounds_file"
+                "$inbounds_file" > "$tmp_file"
+            if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
+                rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
+            fi
+            mv "$tmp_file" "$inbounds_file"
             if [ -f "${work_dir}/tunnel.yml" ]; then
                 sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
                     "${work_dir}/tunnel.yml"
@@ -1055,7 +1063,11 @@ case "$1" in
         rm -f /etc/systemd/system/sing-box.service /etc/systemd/system/argo.service
         hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
             "${conf_dir}/inbounds.json" 2>/dev/null)
-        [ -n "$hy2_port" ] && remove_port "${hy2_port}/udp"
+        if [ -n "$hy2_port" ]; then
+            remove_port "${hy2_port}/udp"
+        else
+            yellow "警告：无法读取 Hy2 端口，防火墙规则可能未清理，请手动检查 iptables\n"
+        fi
         rm -rf "${work_dir}"
         rm -f /usr/bin/sb
         green "\nsing-box 卸载完成\n"
