@@ -1288,7 +1288,7 @@ do_install() {
     else
         yellow "警告：inbounds.json 未落盘，保留备份目录以供重试"
     fi
-
+    setup_firewall_base
     green "\nsing-box 安装完成！"
 
     if is_fixed_tunnel_configured && [ "${TUNNEL_FULLY_RESTORED}" = true ]; then
