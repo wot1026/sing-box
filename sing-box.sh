@@ -1214,6 +1214,52 @@ menu() {
     echo   "==========="
 }
 
+# ── 安装后防火墙收尾 ─────────────────────────────
+setup_firewall_base() {
+    command_exists iptables || return
+
+    # 放行 SSH 端口
+    local ssh_port
+    ssh_port=$(ss -tlnp 2>/dev/null | awk '/sshd/{print $4}' | grep -oE '[0-9]+$' | head -1)
+    [ -z "$ssh_port" ] && ssh_port=22
+    iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null         || iptables -I INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+
+    # 加 REJECT 兜底（如果没有）
+    iptables -C INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null         || iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null || true
+
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+
+    # 扫描公网监听端口，排除本地回环和已知端口，提示用户
+    local accepted_ports
+    accepted_ports=$(iptables -L INPUT -n 2>/dev/null | grep -oP 'dpt:\K[0-9]+')
+    local unknown_ports=()
+    while IFS= read -r line; do
+        local addr port proto proc
+        addr=$(echo "$line" | awk '{print $5}')
+        port=$(echo "$addr" | grep -oE '[0-9]+$')
+        proto=$(echo "$line" | awk '{print $1}')
+        proc=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+')
+        # 跳过本地监听（127.x, ::1）和通配符地址（cloudflared 等出站进程）
+        echo "$addr" | grep -qE '^127\.|^\[::1\]|^\*$' && continue
+        # 跳过 cloudflared/argo 出站进程（端口随机，无需放行）
+        echo "$proc" | grep -qE '^(cloudflared|argo)$' && continue
+        # 跳过已在防火墙里的端口
+        echo "$accepted_ports" | grep -qx "$port" && continue
+        # 跳过空端口
+        [ -z "$port" ] && continue
+        unknown_ports+=("  ${port}/${proto} → ${proc}")
+    done < <(ss -tlunp 2>/dev/null | tail -n +2)
+
+    if [ ${#unknown_ports[@]} -gt 0 ]; then
+        echo ""
+        yellow "检测到以下端口有进程监听但未在防火墙放行，请确认是否需要手动添加规则："
+        for entry in "${unknown_ports[@]}"; do
+            skyblue "$entry"
+        done
+        yellow "如需放行：iptables -I INPUT -p <协议> --dport <端口> -j ACCEPT\n"
+    fi
+}
+
 # ── 安装流程 ──────────────────────────────────────
 do_install() {
     TUNNEL_FULLY_RESTORED=false
