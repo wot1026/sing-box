@@ -425,9 +425,9 @@ EOF
             cp "${backup_dir}/tunnel.json" "${work_dir}/tunnel.json"
             chmod 600 "${work_dir}/tunnel.json"
         fi
-        if [ -f "${backup_dir}/cf.env" ]; then
-            cp "${backup_dir}/cf.env" "${work_dir}/cf.env"
-            chmod 600 "${work_dir}/cf.env"
+        if [ -f "${backup_dir}/argo_token" ]; then
+            cp "${backup_dir}/argo_token" "${work_dir}/argo_token"
+            chmod 600 "${work_dir}/argo_token"
         fi
     fi
 
@@ -484,10 +484,11 @@ EOF
     TUNNEL_FULLY_RESTORED=false
 
     if [ -f "${work_dir}/tunnel.yml" ]; then
-        _rebuild_argo_service_from_tunnel_yml
+    if _rebuild_argo_service_from_tunnel_yml; then
         systemctl daemon-reload
         systemctl restart argo
     fi
+fi
 }
 
 # ── 根据 tunnel.yml 重建 argo.service（用于恢复备份场景）──
@@ -495,16 +496,17 @@ _rebuild_argo_service_from_tunnel_yml() {
     # TUNNEL_FULLY_RESTORED 由调用方 setup_services 已初始化为 false，此处不重置
 
     if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
+    if [ ! -f "${work_dir}/argo_token" ]; then
         local argo_domain
         argo_domain=$(get_fixed_domain)
         yellow "检测到 Token 模式的隧道备份，域名：${argo_domain}"
-        yellow "Token 信息卸载时不会保存，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
+        yellow "Token 文件缺失，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
         TUNNEL_TOKEN_MODE=true
-        return
+        return 1
     fi
-
-    if [ -f "${work_dir}/tunnel.json" ]; then
-        cat > /etc/systemd/system/argo.service << EOF
+    local argo_token
+    argo_token=$(cat "${work_dir}/argo_token")
+    cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
 After=network.target
@@ -513,19 +515,16 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --config ${work_dir}/tunnel.yml run
+ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${argo_token}
 Restart=on-failure
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
 EOF
-        TUNNEL_FULLY_RESTORED=true
-    else
-        yellow "tunnel.yml 已恢复但缺少 tunnel.json 凭据文件，隧道无法启动"
-        yellow "请重新执行「Argo 隧道管理 → 配置固定隧道」"
-        # tunnel.json 缺失，保持 false
-    fi
+    TUNNEL_FULLY_RESTORED=true
+    return 0
+fi
 }
 
 # ── 服务管理 ──────────────────────────────────────
@@ -987,7 +986,8 @@ EOF
     # 问题12修复：Token 字符集改为 base64url（A-Za-z0-9+/=-_），去掉不合法的 '.'
     elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=_-]{100,500}$ ]]; then
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
-
+        echo "$argo_auth" > "${work_dir}/argo_token" 
+        chmod 600 "${work_dir}/argo_token"
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -1079,6 +1079,7 @@ _do_uninstall_core() {
         [ -f "${work_dir}/tunnel.yml" ]    && cp "${work_dir}/tunnel.yml"    "${backup_dir}/tunnel.yml"
         [ -f "${work_dir}/tunnel.json" ]   && cp "${work_dir}/tunnel.json"   "${backup_dir}/tunnel.json"
         [ -f "${work_dir}/cf.env" ]        && cp "${work_dir}/cf.env"        "${backup_dir}/cf.env"
+        [ -f "${work_dir}/argo_token" ]    && cp "${work_dir}/argo_token"    "${backup_dir}/argo_token"
         chmod -R go-rwx "$backup_dir" 2>/dev/null
 
         if [ -s "${backup_dir}/inbounds.json" ]; then
