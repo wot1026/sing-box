@@ -1240,7 +1240,7 @@ setup_firewall_base() {
         proto=$(echo "$line" | awk '{print $1}')
         proc=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+')
         # 跳过本地监听（127.x, ::1）和通配符地址（cloudflared 等出站进程）
-        echo "$addr" | grep -qE '^127\.|^\[::1\]|^\*$' && continue
+        echo "$addr" | grep -qE '^127\.|^\[::1\]|\*:|^0\.0\.0\.0:' && continue
         # 跳过 cloudflared/argo 出站进程（端口随机，无需放行）
         echo "$proc" | grep -qE '^(cloudflared|argo)$' && continue
         # 跳过已在防火墙里的端口
