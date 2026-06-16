@@ -1141,9 +1141,9 @@ uninstall_singbox() {
     reading "确定要卸载 sing-box 吗? (y/n): " choice
     [[ "$choice" != [yY] ]] && { purple "已取消卸载\n"; return; }
 
-    reading "是否保留节点配置与证书（UUID/端口/隧道/pinSHA256）以便重装时恢复？(y/n，回车默认 n): " keep_choice
+    reading "是否保留节点配置与证书（UUID/端口/隧道/pinSHA256）以便重装时恢复？(y/n，回车默认 y): " keep_choice
     local keep_config=false
-    [[ "$keep_choice" == [yY] ]] && keep_config=true
+    [[ -z "$keep_choice" || "$keep_choice" == [yY] ]] && keep_config=true
 
     yellow "正在卸载…"
     _do_uninstall_core "$keep_config"
