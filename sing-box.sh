@@ -242,12 +242,6 @@ install_singbox() {
         *) red "不支持的架构: ${arch_raw}"; exit 1 ;;
     esac
 
-    # 端口冲突预检（在下载之前，避免白下载）
-    if ss -tlnH | awk '{print $5}' | grep -q ":${ARGO_PORT}$"; then
-        red "端口 ${ARGO_PORT} 已被占用，请修改 ARGO_PORT 后重试"
-        exit 1
-    fi
-
     mkdir -p "${work_dir}" "${conf_dir}"
     chmod 700 "${work_dir}"
 
@@ -1015,7 +1009,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
-    elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=._-]{100,500}$ ]]; then
+    elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=_-]{100,500}$ ]]; then
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
         echo "$argo_auth" > "${work_dir}/argo_token"
         chmod 600 "${work_dir}/argo_token"
@@ -1246,7 +1240,7 @@ setup_firewall_base() {
         proto=$(echo "$line" | awk '{print $1}')
         proc=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+')
         # 跳过本地监听（127.x, ::1）和通配符地址（cloudflared 等出站进程）
-        echo "$addr" | grep -qE '^127\.|^\[::1\]|^\[::\]|\*:|^0\.0\.0\.0:' && continue
+        echo "$addr" | grep -qE '^127\.|^\[::1\]|\*:|^0\.0\.0\.0:' && continue
         # 跳过 cloudflared/argo 出站进程（端口随机，无需放行）
         echo "$proc" | grep -qE '^(cloudflared|argo)$' && continue
         # 跳过已在防火墙里的端口
