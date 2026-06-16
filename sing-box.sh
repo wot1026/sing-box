@@ -1218,9 +1218,14 @@ menu() {
 setup_firewall_base() {
     command_exists iptables || return
 
-    # 放行 SSH 端口
+    # ── 1. 放行 ESTABLISHED/RELATED（必须最先插入，防止回包被 REJECT）──
+    iptables -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
+        || iptables -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+
+    # ── 2. 放行 SSH 端口 ──
     local ssh_port
-    ssh_port=$(ss -tlnpH 2>/dev/null | grep 'sshd' | awk '{print $5}' | grep -oE '[0-9]+$' | head -1)
+    ssh_port=$(ss -tlnpH 2>/dev/null | grep 'sshd' | awk '{print $5}' \
+        | grep -oE '[0-9]+$' | head -1)
     if [ -z "$ssh_port" ]; then
         ssh_port=22
         yellow "警告：未检测到 sshd 监听端口，默认放行 22"
@@ -1228,28 +1233,51 @@ setup_firewall_base() {
     iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
         || iptables -I INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
 
-    # 加 REJECT 兜底
-    iptables -L INPUT -n 2>/dev/null | grep -q "^REJECT" \
+    # ── 3. REJECT 兜底（用 -C 精确检测，避免重复追加）──
+    iptables -C INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null \
         || iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null || true
 
-    # 持久化
+    # ── 4. 持久化，并提示是否安装了加载服务 ──
     mkdir -p /etc/iptables 2>/dev/null || true
     iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    if ! command_exists iptables-restore || \
+       ! systemctl is-enabled netfilter-persistent 2>/dev/null | grep -q enabled; then
+        yellow "警告：重启后规则可能不会自动恢复，建议安装 iptables-persistent"
+    fi
 
-    # 扫描公网监听端口
-    local accepted_ports
-    accepted_ports=$(iptables -L INPUT -n 2>/dev/null | grep -oE 'dpt:[0-9]+' | grep -oE '[0-9]+$')
+    # ── 5. 扫描公网监听端口（分协议处理）──
+    local accepted_tcp accepted_udp
+    accepted_tcp=$(iptables -L INPUT -n 2>/dev/null \
+        | grep -i 'tcp' | grep -oE 'dpt:[0-9]+' | grep -oE '[0-9]+$')
+    accepted_udp=$(iptables -L INPUT -n 2>/dev/null \
+        | grep -i 'udp' | grep -oE 'dpt:[0-9]+' | grep -oE '[0-9]+$')
+
     local unknown_ports=()
     while IFS= read -r line; do
         local addr port proto proc
         addr=$(echo "$line"  | awk '{print $5}')
         port=$(echo "$addr"  | grep -oE '[0-9]+$')
-        proto=$(echo "$line" | awk '{print $1}')
-        proc=$(echo "$line"  | grep -oE 'users:\(\("[^"]+' | grep -oE '"[^"]+' | tr -d '"')
-        echo "$addr" | grep -qE '^127\.|^\[::1\]:' && continue
-        echo "$proc" | grep -qE '^(cloudflared|argo)$' && continue
-        echo "$accepted_ports" | grep -qx "$port" && continue
+        proto=$(echo "$line" | awk '{print $1}')   # tcp / udp
+        proc=$(echo "$line"  | grep -oE 'users:\(\("[^"]+' \
+            | grep -oE '"[^"]+' | tr -d '"')
+
+        # 过滤回环地址（127.x、::1、* 通配符不是回环但通常无需单独处理）
+        echo "$addr" | grep -qE '^127\.|^\[::1\]:|\*:' && continue
+
+        # 过滤 cloudflared / argo（进程名可能含路径，改为包含匹配）
+        echo "$proc" | grep -qE '(cloudflared|argo)' && continue
+
         [ -z "$port" ] && continue
+
+        # 按协议分别检查是否已放行
+        local already_accepted=false
+        if [ "$proto" = "tcp" ]; then
+            echo "$accepted_tcp" | grep -qx "$port" && already_accepted=true
+        elif [ "$proto" = "udp" ]; then
+            echo "$accepted_udp" | grep -qx "$port" && already_accepted=true
+        fi
+        $already_accepted && continue
+
         unknown_ports+=("  ${port}/${proto} → ${proc:-unknown}")
     done < <(ss -tlunpH 2>/dev/null)
 
@@ -1259,10 +1287,11 @@ setup_firewall_base() {
         for entry in "${unknown_ports[@]}"; do
             skyblue "$entry"
         done
-        yellow "如需放行：iptables -I INPUT -p <协议> --dport <端口> -j ACCEPT\n"
+        # 分协议给出正确的放行提示
+        yellow "TCP 放行：iptables -I INPUT -p tcp --dport <端口> -j ACCEPT"
+        yellow "UDP 放行：iptables -I INPUT -p udp --dport <端口> -j ACCEPT\n"
     fi
 }
-
 # ── 安装流程 ──────────────────────────────────────
 do_install() {
     TUNNEL_FULLY_RESTORED=false
