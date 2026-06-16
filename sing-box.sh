@@ -1216,18 +1216,32 @@ menu() {
 
 # ── 安装后防火墙收尾 ─────────────────────────────
 
+#!/usr/bin/env bash
+# ── 安装后防火墙收尾 ─────────────────────────────
+
 # ── 辅助：循环删除 INPUT 链中所有兜底规则（DROP / REJECT 各变种）──
 _flush_default_rules() {
     local tbl="$1"
-    while "$tbl" -D INPUT -j DROP                                           2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT                                         2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT --reject-with icmp-host-prohibited      2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT --reject-with icmp-port-unreachable     2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT --reject-with tcp-reset                 2>/dev/null; do :; done
+
+    # 空值保护 + 命令存在性检查，防止无限循环
+    [[ -z "$tbl" ]] && return 1
+    command -v "$tbl" &>/dev/null || return 1
+
+    while "$tbl" -D INPUT -j DROP                                        2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT                                      2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT --reject-with icmp-host-prohibited   2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT --reject-with icmp-port-unreachable  2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT --reject-with tcp-reset              2>/dev/null; do :; done
 }
 
 setup_firewall_base() {
-    command_exists iptables || return
+    # ── 0. 前置检查 ──
+    command -v iptables &>/dev/null || { yellow "iptables 未找到，跳过防火墙配置"; return; }
+
+    # 非 root 时 ss 看不到进程名，提前警告
+    if [ "$(id -u)" -ne 0 ]; then
+        yellow "警告：当前非 root，进程名将无法显示"
+    fi
 
     # ── 1. 放行 ESTABLISHED/RELATED（锁定在第 1 条）──
     iptables  -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
@@ -1259,32 +1273,61 @@ setup_firewall_base() {
     _flush_default_rules ip6tables
 
     # ── 5. 扫描公网监听端口，收集未放行的端口 ──
-    local accepted_tcp accepted_udp
-    accepted_tcp=$(iptables -S INPUT 2>/dev/null \
-        | grep ' -p tcp ' | grep -oE '--dport [0-9]+' | awk '{print $2}')
-    accepted_udp=$(iptables -S INPUT 2>/dev/null \
-        | grep ' -p udp ' | grep -oE '--dport [0-9]+' | awk '{print $2}')
+    # IPv4 和 IPv6 已放行端口分别查询，独立判断
+    local accepted4_tcp accepted4_udp accepted6_tcp accepted6_udp
+    accepted4_tcp=$(iptables  -S INPUT 2>/dev/null \
+        | grep ' -p tcp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
+    accepted4_udp=$(iptables  -S INPUT 2>/dev/null \
+        | grep ' -p udp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
+    accepted6_tcp=$(ip6tables -S INPUT 2>/dev/null \
+        | grep ' -p tcp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
+    accepted6_udp=$(ip6tables -S INPUT 2>/dev/null \
+        | grep ' -p udp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
 
     local unknown_ports=()
+    # 循环内用到的变量统一提到循环外
+    local addr port proto proc already4 already6 dup_key is_dup existing
     while IFS= read -r line; do
-        local addr port proto proc
         addr=$(echo "$line"  | awk '{print $5}')
         port=$(echo "$addr"  | grep -oE '[0-9]+$')
+
+        # sed 's/6$//' 只去掉末尾的 6，tcp6→tcp，udp6→udp
         proto=$(echo "$line" | awk '{print $1}' | sed 's/6$//')
+
         proc=$(echo "$line"  | grep -oE 'users:\(\("[^"]+' \
             | grep -oE '"[^"]+' | tr -d '"')
 
-        echo "$addr" | grep -qE '^127\.|^\[::1\]:' && continue
-        echo "$proc" | grep -qE '(cloudflared|argo)'  && continue
-        [ -z "$port" ] && continue
+        # 修复2：兼容 [::1] 无端口后缀的写法
+        echo "$addr" | grep -qE '^127\.|^\[?::1\]?[:\[]?' && continue
 
-        local already_accepted=false
-        if [ "$proto" = "tcp" ]; then
-            echo "$accepted_tcp" | grep -qx "$port" && already_accepted=true
-        elif [ "$proto" = "udp" ]; then
-            echo "$accepted_udp" | grep -qx "$port" && already_accepted=true
+        echo "$proc" | grep -qE '(cloudflared|argo)' && continue
+
+        # 端口为空（含通配符 * 的行）打印警告后跳过
+        if [ -z "$port" ]; then
+            yellow "  警告：无法解析端口，跳过：$line"
+            continue
         fi
-        $already_accepted && continue
+
+        # 分别对 IPv4/IPv6 规则集判断是否已放行
+        already4=false
+        already6=false
+        if [ "$proto" = "tcp" ]; then
+            echo "$accepted4_tcp" | grep -qx "$port" && already4=true
+            echo "$accepted6_tcp" | grep -qx "$port" && already6=true
+        elif [ "$proto" = "udp" ]; then
+            echo "$accepted4_udp" | grep -qx "$port" && already4=true
+            echo "$accepted6_udp" | grep -qx "$port" && already6=true
+        fi
+
+        [[ "$already4" == true && "$already6" == true ]] && continue
+
+        # 修复6：双栈场景下 tcp+tcp6 会产生重复条目，去重后只问一次
+        dup_key="${port}|${proto}"
+        is_dup=false
+        for existing in "${unknown_ports[@]}"; do
+            [[ "$existing" == "${dup_key}|"* ]] && is_dup=true && break
+        done
+        $is_dup && continue
 
         unknown_ports+=("${port}|${proto}|${proc:-unknown}")
     done < <(ss -tlunpH 2>/dev/null)
@@ -1302,7 +1345,7 @@ setup_firewall_base() {
 
             echo ""
             skyblue "  端口：${p_port}/${p_proto}  进程：${p_proc}"
-            printf "  是否放行？[y/N] "
+            printf "  是否放行？[y/N]（30 秒后自动跳过） "
             read -r -t 30 reply </dev/tty || reply="n"
             case "$reply" in
                 [Yy]*) ports_to_allow+=("${p_port}|${p_proto}") ;;
@@ -1312,7 +1355,6 @@ setup_firewall_base() {
     fi
 
     # ── 7. 统一追加放行规则，最后追加 DROP ──
-    #   在这里统一操作，避免循环内反复 flush/追加 DROP
     for entry in "${ports_to_allow[@]}"; do
         local p_port p_proto
         p_port=$(echo "$entry"  | cut -d'|' -f1)
@@ -1327,25 +1369,48 @@ setup_firewall_base() {
     ip6tables -A INPUT -j DROP 2>/dev/null || true
 
     # ── 8. 持久化 ──
+    # 用 tmpfile + mv，防止 iptables-save 失败时清空原文件
     mkdir -p /etc/iptables 2>/dev/null || true
-    iptables-save  > /etc/iptables/rules.v4 2>/dev/null || true
-    ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
 
-    if ! systemctl is-enabled netfilter-persistent 2>/dev/null | grep -q enabled; then
-        yellow "警告：重启后规则可能不会自动恢复"
-        printf "是否现在安装 iptables-persistent？[y/N] "
-        local ans_persist
-        read -r -t 30 ans_persist </dev/tty || ans_persist="n"
-        case "$ans_persist" in
-            [Yy]*)
-                apt-get install -y iptables-persistent 2>/dev/null \
-                    || yum install -y iptables-services 2>/dev/null \
-                    || yellow "自动安装失败，请手动安装 iptables-persistent"
-                ;;
-            *)
-                yellow "跳过，建议手动安装 iptables-persistent"
-                ;;
-        esac
+    local tmp4 tmp6
+    tmp4=$(mktemp 2>/dev/null)
+    if [ -n "$tmp4" ] && iptables-save > "$tmp4" 2>/dev/null; then
+        mv "$tmp4" /etc/iptables/rules.v4
+    else
+        rm -f "$tmp4"
+        yellow "保存 rules.v4 失败"
+    fi
+
+    tmp6=$(mktemp 2>/dev/null)
+    if [ -n "$tmp6" ] && ip6tables-save > "$tmp6" 2>/dev/null; then
+        mv "$tmp6" /etc/iptables/rules.v6
+    else
+        rm -f "$tmp6"
+        yellow "保存 rules.v6 失败"
+    fi
+
+    # ── 9. 持久化服务检查 ──
+    # 修复5：非 systemd 系统上 systemctl 不存在，分开处理避免误判
+    if command -v systemctl &>/dev/null; then
+        if ! systemctl is-enabled netfilter-persistent 2>/dev/null | grep -q enabled; then
+            yellow "警告：重启后规则可能不会自动恢复"
+            printf "是否现在安装 iptables-persistent？[y/N] "
+            local ans_persist
+            read -r -t 30 ans_persist </dev/tty || ans_persist="n"
+            case "$ans_persist" in
+                [Yy]*)
+                    apt-get install -y iptables-persistent 2>/dev/null \
+                        || dnf install -y iptables-services 2>/dev/null \
+                        || yum install -y iptables-services 2>/dev/null \
+                        || yellow "自动安装失败，请手动安装 iptables-persistent"
+                    ;;
+                *)
+                    yellow "跳过，建议手动安装 iptables-persistent"
+                    ;;
+            esac
+        fi
+    else
+        yellow "警告：非 systemd 系统，请手动确保 iptables 规则开机加载"
     fi
 
     green "防火墙规则已配置完成"
