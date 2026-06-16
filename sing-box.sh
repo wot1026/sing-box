@@ -3,7 +3,7 @@
 # 自用 sing-box 安装脚本
 # 协议: vless-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.6.15 00:00
+# 最后更新时间: 2026.6.14 12:00
 # =========================
 
 export LANG=en_US.UTF-8
@@ -251,9 +251,9 @@ install_singbox() {
     apt-get install -y qrencode 2>/dev/null || yellow "qrencode 安装失败，二维码功能不可用"
 
     local hy2_port uuid vless_path argo_port="${ARGO_PORT}"
-    local restore_backup=false
 
     # ── 检测是否存在卸载时保留的备份配置 ──────────
+    local restore_backup=false
     if [ -f "${backup_dir}/inbounds.json" ]; then
         yellow "\n检测到上次卸载时保留的节点配置备份"
         local restore_choice
@@ -269,6 +269,7 @@ install_singbox() {
         hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${backup_dir}/inbounds.json")
         argo_port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "${backup_dir}/inbounds.json")
 
+        # 校验恢复出来的值，任何一项异常则放弃恢复，改用全新生成
         if [ -z "$uuid" ] || [ "$uuid" = "null" ] \
            || [ -z "$vless_path" ] || [ "$vless_path" = "null" ] \
            || ! [[ "$hy2_port" =~ ^[0-9]+$ ]] \
@@ -276,6 +277,7 @@ install_singbox() {
             yellow "备份配置内容异常，已忽略备份，将生成全新配置"
             restore_backup=false
         else
+            # 端口被占用则放弃该项恢复，重新挑选
             if ss -ulnH | awk '{print $5}' | grep -q ":${hy2_port}$"; then
                 yellow "备份中的 Hysteria2 端口 ${hy2_port} 已被占用，将重新分配"
                 hy2_port=$(pick_free_udp_port) || exit 1
@@ -294,33 +296,21 @@ install_singbox() {
         vless_path="/${uuid}-vless"
     fi
 
+    # ── 在确定最终 argo_port 后再检查端口占用 ──────
     if ss -tlnH | awk '{print $5}' | grep -q ":${argo_port}$"; then
-        red "端口 ${argo_port} 已被占用，请修改 ARGO_PORT 后重试"
+        red "端口 ${argo_port} 已被占用，请修改 ARGO_PORT 后重试，或在卸载备份中清理冲突配置"
         exit 1
     fi
 
     allow_port "${hy2_port}/udp"
 
-    # ── 证书：优先从备份恢复，保持 pinSHA256 不变 ─
-    local cert_restored=false
-    if $restore_backup \
-       && [ -f "${backup_dir}/cert.pem" ] \
-       && [ -f "${backup_dir}/private.key" ] \
-       && openssl x509 -noout -in "${backup_dir}/cert.pem" 2>/dev/null; then
-        cp "${backup_dir}/cert.pem"    "${work_dir}/cert.pem"
-        cp "${backup_dir}/private.key" "${work_dir}/private.key"
-        chmod 600 "${work_dir}/private.key"
-        green "已从备份恢复 TLS 证书（pinSHA256 不变）"
-        cert_restored=true
-    else
-        yellow "正在生成新 TLS 证书..."
-        openssl ecparam -genkey -name prime256v1 -out "${work_dir}/private.key" 2>/dev/null
-        openssl req -new -x509 -days 3650 \
-            -key "${work_dir}/private.key" \
-            -out "${work_dir}/cert.pem" \
-            -subj "/CN=bing.com" 2>/dev/null
-        chmod 600 "${work_dir}/private.key"
-    fi
+    yellow "正在生成 TLS 证书..."
+    openssl ecparam -genkey -name prime256v1 -out "${work_dir}/private.key" 2>/dev/null
+    openssl req -new -x509 -days 3650 \
+        -key "${work_dir}/private.key" \
+        -out "${work_dir}/cert.pem" \
+        -subj "/CN=bing.com" 2>/dev/null
+    chmod 600 "${work_dir}/private.key"
 
     cat > "${conf_dir}/log.json" << EOF
 {
@@ -435,16 +425,14 @@ EOF
             cp "${backup_dir}/tunnel.json" "${work_dir}/tunnel.json"
             chmod 600 "${work_dir}/tunnel.json"
         fi
-        if [ -f "${backup_dir}/argo_token" ]; then
-            cp "${backup_dir}/argo_token" "${work_dir}/argo_token"
-            chmod 600 "${work_dir}/argo_token"
-        fi
         if [ -f "${backup_dir}/cf.env" ]; then
             cp "${backup_dir}/cf.env" "${work_dir}/cf.env"
             chmod 600 "${work_dir}/cf.env"
         fi
     fi
 
+    # 问题7/8修复：install_singbox 只报告核心安装结果，
+    # 不在此处对隧道恢复状态下结论（TUNNEL_FULLY_RESTORED 尚未确定）
     green "sing-box 核心安装完成"
 }
 
@@ -492,50 +480,29 @@ EOF
     systemctl enable sing-box && systemctl start sing-box
     systemctl enable argo
 
+    # 问题10修复：在此处统一初始化，确保无论哪条路径都有明确值
     TUNNEL_FULLY_RESTORED=false
 
     if [ -f "${work_dir}/tunnel.yml" ]; then
-        if _rebuild_argo_service_from_tunnel_yml; then
-            systemctl daemon-reload
-            systemctl restart argo
-        fi
+        _rebuild_argo_service_from_tunnel_yml
+        systemctl daemon-reload
+        systemctl restart argo
     fi
 }
 
 # ── 根据 tunnel.yml 重建 argo.service（用于恢复备份场景）──
 _rebuild_argo_service_from_tunnel_yml() {
+    # TUNNEL_FULLY_RESTORED 由调用方 setup_services 已初始化为 false，此处不重置
+
     if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
-        if [ ! -f "${work_dir}/argo_token" ]; then
-            local argo_domain
-            argo_domain=$(get_fixed_domain)
-            yellow "检测到 Token 模式的隧道备份，域名：${argo_domain}"
-            yellow "Token 文件缺失，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
-            TUNNEL_TOKEN_MODE=true
-            return 1
-        fi
-        local argo_token
-        argo_token=$(cat "${work_dir}/argo_token")
-        cat > /etc/systemd/system/argo.service << EOF
-[Unit]
-Description=Cloudflare Tunnel
-After=network.target
-
-[Service]
-Type=simple
-NoNewPrivileges=yes
-TimeoutStartSec=0
-ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${argo_token}
-Restart=on-failure
-RestartSec=5s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        TUNNEL_FULLY_RESTORED=true
-        return 0
+        local argo_domain
+        argo_domain=$(get_fixed_domain)
+        yellow "检测到 Token 模式的隧道备份，域名：${argo_domain}"
+        yellow "Token 信息卸载时不会保存，请重新执行「Argo 隧道管理 → 配置固定隧道」输入 Token"
+        TUNNEL_TOKEN_MODE=true
+        return
     fi
 
-    # JSON 凭据模式：tunnel.yml 已含 credentials-file，直接用
     if [ -f "${work_dir}/tunnel.json" ]; then
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
@@ -554,11 +521,11 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
         TUNNEL_FULLY_RESTORED=true
-        return 0
+    else
+        yellow "tunnel.yml 已恢复但缺少 tunnel.json 凭据文件，隧道无法启动"
+        yellow "请重新执行「Argo 隧道管理 → 配置固定隧道」"
+        # tunnel.json 缺失，保持 false
     fi
-
-    yellow "隧道配置文件存在但缺少凭据，请重新配置固定隧道"
-    return 1
 }
 
 # ── 服务管理 ──────────────────────────────────────
@@ -607,6 +574,8 @@ get_info() {
     [ -z "$server_ip" ] && { red "获取 IP 失败"; return 1; }
     node_prefix=$(get_node_name)
 
+    # 问题14修复：get_info 作为唯一从文件读取 CF 配置的地方，
+    # change_config 选项4写完文件后不再手动更新全局变量，统一由此处加载
     if [ -f "${work_dir}/cf.env" ]; then
         local _cfip _cfport
         _cfip=$(grep  '^CFIP='   "${work_dir}/cf.env" | cut -d'=' -f2-)
@@ -791,10 +760,12 @@ change_config() {
                 (.inbounds[] | select(.type=="vless")     | .transport.path)      = $p |
                 (.inbounds[] | select(.type=="hysteria2") | .users[] | .password) = $u
             ' "$inbounds_file" > "$tmp_file"
+
             if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
                 rm -f "$tmp_file"; red "配置文件写入失败，请检查！"; sleep 2; return
             fi
             mv "$tmp_file" "$inbounds_file"
+
             restart_singbox && get_info
             green "\nUUID 已修改为：${new_uuid}\n"
             ;;
@@ -846,6 +817,7 @@ change_config() {
                 rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
             fi
             mv "$tmp_file" "$inbounds_file"
+            # 问题11修复：先判断模式，Token 模式跳过 sed（tunnel.yml 无 service 行）
             if [ -f "${work_dir}/tunnel.yml" ]; then
                 if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
                     yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
@@ -879,6 +851,8 @@ change_config() {
             esac
             printf 'CFIP=%s\nCFPORT=%s\n' "$cfip" "$cfport" > "${work_dir}/cf.env"
             chmod 600 "${work_dir}/cf.env"
+            # 问题14修复：写完文件后不再手动更新全局变量，
+            # get_info 会统一从 cf.env 加载，此处直接调用即可
             get_info
             green "\nCF 优选已更新为：${cfip}:${cfport}\n"
             ;;
@@ -903,7 +877,7 @@ upgrade_singbox() {
 
     local current_ver
     current_ver=$("${work_dir}/sing-box" version 2>/dev/null \
-        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        | grep -oP '\d+\.\d+\.\d+' | head -1)
     yellow "当前版本: ${current_ver:-未知}"
 
     yellow "正在查询最新版本…"
@@ -965,6 +939,7 @@ configure_fixed_tunnel() {
     reading "\n请输入 Argo 密钥（Token 或 JSON）: " argo_auth
     [ -z "$argo_auth" ] && { red "密钥不能为空"; return 1; }
 
+    # 问题C修复：先读取实际运行端口，再提示，避免与用户修改后的端口不一致
     local current_argo_port
     current_argo_port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "${conf_dir}/inbounds.json" 2>/dev/null)
     [[ "$current_argo_port" =~ ^[0-9]+$ ]] || current_argo_port="${ARGO_PORT}"
@@ -1009,10 +984,10 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
+    # 问题12修复：Token 字符集改为 base64url（A-Za-z0-9+/=-_），去掉不合法的 '.'
     elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=_-]{100,500}$ ]]; then
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
-        echo "$argo_auth" > "${work_dir}/argo_token"
-        chmod 600 "${work_dir}/argo_token"
+
         cat > /etc/systemd/system/argo.service << EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -1090,6 +1065,8 @@ manage_singbox() {
 # ── 卸载核心逻辑（共享） ──────────────────────────
 _do_uninstall_core() {
     local keep_config="${1:-false}"
+    # 问题13修复：用独立变量追踪备份是否真正成功，
+    # 供调用方（uninstall_singbox）决定最终打印什么提示
     BACKUP_SUCCESS=false
 
     if [ "$keep_config" = true ]; then
@@ -1098,20 +1075,17 @@ _do_uninstall_core() {
         chmod 700 "$backup_dir"
         rm -f "${backup_dir}"/* 2>/dev/null
 
-        [ -f "${conf_dir}/inbounds.json" ]  && cp "${conf_dir}/inbounds.json"  "${backup_dir}/inbounds.json"
-        [ -f "${work_dir}/cert.pem" ]        && cp "${work_dir}/cert.pem"        "${backup_dir}/cert.pem"
-        [ -f "${work_dir}/private.key" ]     && cp "${work_dir}/private.key"     "${backup_dir}/private.key"
-        [ -f "${work_dir}/tunnel.yml" ]      && cp "${work_dir}/tunnel.yml"      "${backup_dir}/tunnel.yml"
-        [ -f "${work_dir}/tunnel.json" ]     && cp "${work_dir}/tunnel.json"     "${backup_dir}/tunnel.json"
-        [ -f "${work_dir}/cf.env" ]          && cp "${work_dir}/cf.env"          "${backup_dir}/cf.env"
-        [ -f "${work_dir}/argo_token" ]      && cp "${work_dir}/argo_token"      "${backup_dir}/argo_token"
+        [ -f "${conf_dir}/inbounds.json" ] && cp "${conf_dir}/inbounds.json" "${backup_dir}/inbounds.json"
+        [ -f "${work_dir}/tunnel.yml" ]    && cp "${work_dir}/tunnel.yml"    "${backup_dir}/tunnel.yml"
+        [ -f "${work_dir}/tunnel.json" ]   && cp "${work_dir}/tunnel.json"   "${backup_dir}/tunnel.json"
+        [ -f "${work_dir}/cf.env" ]        && cp "${work_dir}/cf.env"        "${backup_dir}/cf.env"
         chmod -R go-rwx "$backup_dir" 2>/dev/null
 
-        if [ -s "${backup_dir}/inbounds.json" ] && [ -s "${backup_dir}/cert.pem" ]; then
-            green "节点配置与证书已备份至 ${backup_dir}，重装时将自动检测并询问是否恢复"
+        if [ -s "${backup_dir}/inbounds.json" ]; then
+            green "节点配置已备份至 ${backup_dir}，重装时将自动检测并询问是否恢复"
             BACKUP_SUCCESS=true
         else
-            red "备份失败（inbounds.json 或 cert.pem 缺失），将按未保留配置继续卸载"
+            red "备份失败（未找到 inbounds.json），将按未保留配置继续卸载"
             rm -rf "$backup_dir" 2>/dev/null
         fi
     else
@@ -1141,15 +1115,17 @@ uninstall_singbox() {
     reading "确定要卸载 sing-box 吗? (y/n): " choice
     [[ "$choice" != [yY] ]] && { purple "已取消卸载\n"; return; }
 
-    reading "是否保留节点配置与证书（UUID/端口/隧道/pinSHA256）以便重装时恢复？(y/n，回车默认 n): " keep_choice
+    reading "是否保留节点配置（UUID/端口/隧道）以便重装时恢复？(y/n，回车默认 n): " keep_choice
     local keep_config=false
     [[ "$keep_choice" == [yY] ]] && keep_config=true
 
     yellow "正在卸载…"
     _do_uninstall_core "$keep_config"
 
+    # 问题13修复：根据 BACKUP_SUCCESS 而非 keep_config 决定最终提示，
+    # 避免备份失败时仍打印"节点配置已保留"
     if $keep_config && [ "${BACKUP_SUCCESS:-false}" = true ]; then
-        green "\nsing-box 卸载完成，节点配置与证书已保留，下次安装时可选择恢复\n"
+        green "\nsing-box 卸载完成，节点配置已保留，下次安装时可选择恢复\n"
     else
         green "\nsing-box 卸载完成\n"
     fi
@@ -1240,7 +1216,7 @@ setup_firewall_base() {
         proto=$(echo "$line" | awk '{print $1}')
         proc=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+')
         # 跳过本地监听（127.x, ::1）和通配符地址（cloudflared 等出站进程）
-        echo "$addr" | grep -qE '^127\.|^\[::1\]|\*:|^0\.0\.0\.0:' && continue
+        echo "$addr" | grep -qE '^127\.|^\[::1\]|^\*$' && continue
         # 跳过 cloudflared/argo 出站进程（端口随机，无需放行）
         echo "$proc" | grep -qE '^(cloudflared|argo)$' && continue
         # 跳过已在防火墙里的端口
@@ -1262,6 +1238,7 @@ setup_firewall_base() {
 
 # ── 安装流程 ──────────────────────────────────────
 do_install() {
+    # 问题10修复：在顶层明确初始化，不依赖函数内部赋值顺序
     TUNNEL_FULLY_RESTORED=false
     BACKUP_SUCCESS=false
     TUNNEL_TOKEN_MODE=false
@@ -1283,11 +1260,14 @@ do_install() {
     sleep 2
     create_shortcut
 
+    # 问题9修复：确认 inbounds.json 已落盘后再清理备份，
+    # 避免中途失败时备份被提前删除
     if [ -s "${conf_dir}/inbounds.json" ]; then
         [ -d "$backup_dir" ] && rm -rf "$backup_dir"
     else
         yellow "警告：inbounds.json 未落盘，保留备份目录以供重试"
     fi
+
     setup_firewall_base
     green "\nsing-box 安装完成！"
 
