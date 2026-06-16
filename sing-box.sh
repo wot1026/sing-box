@@ -102,11 +102,25 @@ allow_port() {
 
     if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
         mkdir -p /etc/iptables
-        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+        local _tmp4
+        _tmp4=$(mktemp 2>/dev/null)
+        if [ -n "$_tmp4" ] && iptables-save > "$_tmp4" 2>/dev/null; then
+            mv "$_tmp4" /etc/iptables/rules.v4
+        else
+            rm -f "$_tmp4"
+            yellow "保存 rules.v4 失败"
+        fi
     fi
     if [ $has_ip6tables -eq 1 ] && command_exists ip6tables-save; then
         mkdir -p /etc/iptables
-        ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+        local _tmp6
+        _tmp6=$(mktemp 2>/dev/null)
+        if [ -n "$_tmp6" ] && ip6tables-save > "$_tmp6" 2>/dev/null; then
+            mv "$_tmp6" /etc/iptables/rules.v6
+        else
+            rm -f "$_tmp6"
+            yellow "保存 rules.v6 失败"
+        fi
     fi
 }
 
@@ -130,11 +144,25 @@ remove_port() {
 
     if [ $has_iptables -eq 1 ] && command_exists iptables-save; then
         mkdir -p /etc/iptables
-        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+        local _tmp4
+        _tmp4=$(mktemp 2>/dev/null)
+        if [ -n "$_tmp4" ] && iptables-save > "$_tmp4" 2>/dev/null; then
+            mv "$_tmp4" /etc/iptables/rules.v4
+        else
+            rm -f "$_tmp4"
+            yellow "保存 rules.v4 失败"
+        fi
     fi
     if [ $has_ip6tables -eq 1 ] && command_exists ip6tables-save; then
         mkdir -p /etc/iptables
-        ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+        local _tmp6
+        _tmp6=$(mktemp 2>/dev/null)
+        if [ -n "$_tmp6" ] && ip6tables-save > "$_tmp6" 2>/dev/null; then
+            mv "$_tmp6" /etc/iptables/rules.v6
+        else
+            rm -f "$_tmp6"
+            yellow "保存 rules.v6 失败"
+        fi
     fi
 }
 
@@ -1133,7 +1161,7 @@ _do_uninstall_core() {
     fi
 
     rm -rf "${work_dir}"
-    rm -f /usr/bin/sb
+    [ -L /usr/bin/sb ] && rm -f /usr/bin/sb
 }
 
 # ── 卸载（交互） ──────────────────────────────────
@@ -1173,7 +1201,7 @@ update_script() {
     local tmp
     tmp=$(mktemp)
     curl -fsSL "$SCRIPT_URL" -o "$tmp"
-    if [ -s "$tmp" ] && [ "$(wc -c < "$tmp")" -gt 50 ]; then
+    if [ -s "$tmp" ] && grep -q 'install_singbox' "$tmp"; then
         mv "$tmp" "${work_dir}/sb.sh"
         chmod +x "${work_dir}/sb.sh"
         ln -sf "${work_dir}/sb.sh" /usr/bin/sb
@@ -1215,10 +1243,6 @@ menu() {
 }
 
 # ── 安装后防火墙收尾 ─────────────────────────────
-
-#!/usr/bin/env bash
-# ── 安装后防火墙收尾 ─────────────────────────────
-
 # ── 辅助：循环删除 INPUT 链中所有兜底规则（DROP / REJECT 各变种）──
 _flush_default_rules() {
     local tbl="$1"
@@ -1298,7 +1322,7 @@ setup_firewall_base() {
             | grep -oE '"[^"]+' | tr -d '"')
 
         # 修复2：兼容 [::1] 无端口后缀的写法
-        echo "$addr" | grep -qE '^127\.|^\[?::1\]?[:\[]?' && continue
+        echo "$addr" | grep -qE '^127\.|^\[::1\][:\[]?|^::1[:\[]' && continue
 
         echo "$proc" | grep -qE '(cloudflared|argo)' && continue
 
@@ -1327,7 +1351,7 @@ setup_firewall_base() {
         for existing in "${unknown_ports[@]}"; do
             [[ "$existing" == "${dup_key}|"* ]] && is_dup=true && break
         done
-        $is_dup && continue
+        [[ "$is_dup" == true ]] && continue
 
         unknown_ports+=("${port}|${proto}|${proc:-unknown}")
     done < <(ss -tlunpH 2>/dev/null)
