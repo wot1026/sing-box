@@ -1260,7 +1260,10 @@ _flush_default_rules() {
 
 setup_firewall_base() {
     # ── 0. 前置检查 ──
-    command -v iptables &>/dev/null || { yellow "iptables 未找到，跳过防火墙配置"; return; }
+    if ! command -v iptables &>/dev/null; then
+    yellow "未检测到 iptables，正在安装…"
+    apt-get install -y iptables 2>/dev/null || { red "iptables 安装失败，跳过防火墙配置"; return; }
+    fi
 
     # 非 root 时 ss 看不到进程名，提前警告
     if [ "$(id -u)" -ne 0 ]; then
