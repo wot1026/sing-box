@@ -1264,7 +1264,10 @@ setup_firewall_base() {
     yellow "未检测到 iptables，正在安装…"
     apt-get install -y iptables 2>/dev/null || { red "iptables 安装失败，跳过防火墙配置"; return; }
     fi
-
+    local hy2_port_reapply
+    hy2_port_reapply=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
+        "${conf_dir}/inbounds.json" 2>/dev/null)
+    [ -n "$hy2_port_reapply" ] && allow_port "${hy2_port_reapply}/udp"
     # 非 root 时 ss 看不到进程名，提前警告
     if [ "$(id -u)" -ne 0 ]; then
         yellow "警告：当前非 root，进程名将无法显示"
@@ -1284,8 +1287,8 @@ setup_firewall_base() {
 
     # ── 3. 放行 SSH 端口（锁定在第 3 条）──
     local ssh_port
-    ssh_port=$(ss -tlnpH 2>/dev/null | grep 'sshd' \
-        | awk '{print $5}' | grep -oE '[0-9]+$' | head -1)
+    ssh_port=$(ss -tlnpH 2>/dev/null | awk '/sshd/{print $4}' | grep -oE '[0-9]+$' | head -1)
+    [ -z "$ssh_port" ] && ssh_port=$(grep -E '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
     if [ -z "$ssh_port" ]; then
         ssh_port=22
         yellow "警告：未检测到 sshd 监听端口，默认放行 22"
