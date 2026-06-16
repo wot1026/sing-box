@@ -1220,35 +1220,38 @@ setup_firewall_base() {
 
     # 放行 SSH 端口
     local ssh_port
-    ssh_port=$(ss -tlnp 2>/dev/null | awk '/sshd/{print $4}' | grep -oE '[0-9]+$' | head -1)
-    [ -z "$ssh_port" ] && ssh_port=22
-    iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null         || iptables -I INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+    ssh_port=$(ss -tlnpH 2>/dev/null | grep 'sshd' | awk '{print $5}' | grep -oE '[0-9]+$' | head -1)
+    if [ -z "$ssh_port" ]; then
+        ssh_port=22
+        yellow "警告：未检测到 sshd 监听端口，默认放行 22"
+    fi
+    iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
+        || iptables -I INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
 
-    # 加 REJECT 兜底（如果没有）
-    iptables -C INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null         || iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null || true
+    # 加 REJECT 兜底
+    iptables -L INPUT -n 2>/dev/null | grep -q "^REJECT" \
+        || iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited 2>/dev/null || true
 
+    # 持久化
+    mkdir -p /etc/iptables 2>/dev/null || true
     iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
 
-    # 扫描公网监听端口，排除本地回环和已知端口，提示用户
+    # 扫描公网监听端口
     local accepted_ports
     accepted_ports=$(iptables -L INPUT -n 2>/dev/null | grep -oE 'dpt:[0-9]+' | grep -oE '[0-9]+$')
     local unknown_ports=()
     while IFS= read -r line; do
         local addr port proto proc
-        addr=$(echo "$line" | awk '{print $5}')
-        port=$(echo "$addr" | grep -oE '[0-9]+$')
+        addr=$(echo "$line"  | awk '{print $5}')
+        port=$(echo "$addr"  | grep -oE '[0-9]+$')
         proto=$(echo "$line" | awk '{print $1}')
-        proc=$(echo "$line" | grep -oE 'users:\(\("[^"]+' | grep -oE '"[^"]+' | tr -d '"')
-        # 跳过本地监听（127.x, ::1）和通配符地址（cloudflared 等出站进程）
-        echo "$addr" | grep -qE '^127\.|^\[::1\]:|^\[::\]:|^\*:|^0\.0\.0\.0:' && continue
-        # 跳过 cloudflared/argo 出站进程（端口随机，无需放行）
+        proc=$(echo "$line"  | grep -oE 'users:\(\("[^"]+' | grep -oE '"[^"]+' | tr -d '"')
+        echo "$addr" | grep -qE '^127\.|^\[::1\]:' && continue
         echo "$proc" | grep -qE '^(cloudflared|argo)$' && continue
-        # 跳过已在防火墙里的端口
         echo "$accepted_ports" | grep -qx "$port" && continue
-        # 跳过空端口
         [ -z "$port" ] && continue
-        unknown_ports+=("  ${port}/${proto} → ${proc}")
-    done < <(ss -tlunp 2>/dev/null | tail -n +2)
+        unknown_ports+=("  ${port}/${proto} → ${proc:-unknown}")
+    done < <(ss -tlunpH 2>/dev/null)
 
     if [ ${#unknown_ports[@]} -gt 0 ]; then
         echo ""
