@@ -1215,26 +1215,19 @@ menu() {
 }
 
 # ── 安装后防火墙收尾 ─────────────────────────────
+
+# ── 辅助：循环删除 INPUT 链中所有兜底规则（DROP / REJECT 各变种）──
+_flush_default_rules() {
+    local tbl="$1"
+    while "$tbl" -D INPUT -j DROP                                           2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT                                         2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT --reject-with icmp-host-prohibited      2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT --reject-with icmp-port-unreachable     2>/dev/null; do :; done
+    while "$tbl" -D INPUT -j REJECT --reject-with tcp-reset                 2>/dev/null; do :; done
+}
+
 setup_firewall_base() {
     command_exists iptables || return
-
-    # ── 辅助：同步操作 iptables + ip6tables ──
-    ipt() {
-        iptables "$@" 2>/dev/null || true
-        ip6tables "$@" 2>/dev/null || true
-    }
-
-    # ── 辅助：循环删除链中所有匹配的兜底规则（DROP / REJECT 各变种）──
-    flush_default_rules() {
-        local tbl="$1"   # iptables 或 ip6tables
-        # 循环删 DROP
-        while "$tbl" -D INPUT -j DROP 2>/dev/null; do :; done
-        # 循环删各种 REJECT 写法
-        while "$tbl" -D INPUT -j REJECT 2>/dev/null; do :; done
-        while "$tbl" -D INPUT -j REJECT --reject-with icmp-host-prohibited  2>/dev/null; do :; done
-        while "$tbl" -D INPUT -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do :; done
-        while "$tbl" -D INPUT -j REJECT --reject-with tcp-reset             2>/dev/null; do :; done
-    }
 
     # ── 1. 放行 ESTABLISHED/RELATED（锁定在第 1 条）──
     iptables  -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
@@ -1261,12 +1254,11 @@ setup_firewall_base() {
     ip6tables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
         || ip6tables -I INPUT 3 -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
 
-    # ── 4. 清空所有兜底规则（DROP / REJECT 全变种），稍后统一用 DROP 追加 ──
-    flush_default_rules iptables
-    flush_default_rules ip6tables
+    # ── 4. 清空所有兜底规则，稍后统一在链尾追加 DROP ──
+    _flush_default_rules iptables
+    _flush_default_rules ip6tables
 
-    # ── 5. 扫描公网监听端口，逐一询问是否放行 ──
-    #   用 iptables -S 代替 iptables -L，输出永远是端口数字，不会出现服务名
+    # ── 5. 扫描公网监听端口，收集未放行的端口 ──
     local accepted_tcp accepted_udp
     accepted_tcp=$(iptables -S INPUT 2>/dev/null \
         | grep ' -p tcp ' | grep -oE '--dport [0-9]+' | awk '{print $2}')
@@ -1278,20 +1270,14 @@ setup_firewall_base() {
         local addr port proto proc
         addr=$(echo "$line"  | awk '{print $5}')
         port=$(echo "$addr"  | grep -oE '[0-9]+$')
-        # tcp6/udp6 统一归并为 tcp/udp
         proto=$(echo "$line" | awk '{print $1}' | sed 's/6$//')
         proc=$(echo "$line"  | grep -oE 'users:\(\("[^"]+' \
             | grep -oE '"[^"]+' | tr -d '"')
 
-        # 过滤回环地址（127.x 和 ::1）
         echo "$addr" | grep -qE '^127\.|^\[::1\]:' && continue
-
-        # 过滤 cloudflared / argo
-        echo "$proc" | grep -qE '(cloudflared|argo)' && continue
-
+        echo "$proc" | grep -qE '(cloudflared|argo)'  && continue
         [ -z "$port" ] && continue
 
-        # 按协议检查是否已放行
         local already_accepted=false
         if [ "$proto" = "tcp" ]; then
             echo "$accepted_tcp" | grep -qx "$port" && already_accepted=true
@@ -1303,12 +1289,13 @@ setup_firewall_base() {
         unknown_ports+=("${port}|${proto}|${proc:-unknown}")
     done < <(ss -tlunpH 2>/dev/null)
 
+    # ── 6. 逐一询问，收集用户选择放行的端口 ──
+    local ports_to_allow=()
     if [ ${#unknown_ports[@]} -gt 0 ]; then
         echo ""
         yellow "检测到以下端口有进程监听但未在防火墙放行，逐一确认是否放行："
-        local need_save=false
         for entry in "${unknown_ports[@]}"; do
-            local p_port p_proto p_proc
+            local p_port p_proto p_proc reply
             p_port=$(echo "$entry"  | cut -d'|' -f1)
             p_proto=$(echo "$entry" | cut -d'|' -f2)
             p_proc=$(echo "$entry"  | cut -d'|' -f3)
@@ -1316,35 +1303,30 @@ setup_firewall_base() {
             echo ""
             skyblue "  端口：${p_port}/${p_proto}  进程：${p_proc}"
             printf "  是否放行？[y/N] "
-            local ans
-            read -r -t 30 ans </dev/tty || ans="n"
-            case "$ans" in
-                [Yy]*)
-                    # 删掉兜底 → 追加放行 → 重新追加兜底 DROP
-                    flush_default_rules iptables
-                    flush_default_rules ip6tables
-                    ipt -A INPUT -p "$p_proto" --dport "$p_port" -j ACCEPT
-                    ipt -A INPUT -j DROP
-                    green "  已放行 ${p_port}/${p_proto}"
-                    need_save=true
-                    ;;
-                *)
-                    yellow "  跳过 ${p_port}/${p_proto}"
-                    ;;
+            read -r -t 30 reply </dev/tty || reply="n"
+            case "$reply" in
+                [Yy]*) ports_to_allow+=("${p_port}|${p_proto}") ;;
+                *)     yellow "  跳过 ${p_port}/${p_proto}" ;;
             esac
         done
-
-        if $need_save; then
-            iptables-save  > /etc/iptables/rules.v4 2>/dev/null || true
-            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
-            green "防火墙规则已更新并持久化"
-        fi
-    else
-        # 没有需要询问的端口，直接追加兜底 DROP
-        ipt -A INPUT -j DROP
     fi
 
-    # ── 6. 持久化，并提示/安装 netfilter-persistent ──
+    # ── 7. 统一追加放行规则，最后追加 DROP ──
+    #   在这里统一操作，避免循环内反复 flush/追加 DROP
+    for entry in "${ports_to_allow[@]}"; do
+        local p_port p_proto
+        p_port=$(echo "$entry"  | cut -d'|' -f1)
+        p_proto=$(echo "$entry" | cut -d'|' -f2)
+        iptables  -A INPUT -p "$p_proto" --dport "$p_port" -j ACCEPT 2>/dev/null || true
+        ip6tables -A INPUT -p "$p_proto" --dport "$p_port" -j ACCEPT 2>/dev/null || true
+        green "  已放行 ${p_port}/${p_proto}"
+    done
+
+    # 无论用户是否放行了端口，都追加 DROP 兜底
+    iptables  -A INPUT -j DROP 2>/dev/null || true
+    ip6tables -A INPUT -j DROP 2>/dev/null || true
+
+    # ── 8. 持久化 ──
     mkdir -p /etc/iptables 2>/dev/null || true
     iptables-save  > /etc/iptables/rules.v4 2>/dev/null || true
     ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
@@ -1365,6 +1347,8 @@ setup_firewall_base() {
                 ;;
         esac
     fi
+
+    green "防火墙规则已配置完成"
 }
 
 # ── 安装流程 ──────────────────────────────────────
