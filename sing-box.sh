@@ -1218,37 +1218,54 @@ menu() {
 setup_firewall_base() {
     command_exists iptables || return
 
-    # ── 1. 放行 ESTABLISHED/RELATED（锁定在第 1 条，保证回包永远最先匹配）──
-    iptables -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
-        || iptables -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+    # ── 辅助：同步操作 iptables + ip6tables ──
+    ipt() {
+        iptables "$@" 2>/dev/null || true
+        ip6tables "$@" 2>/dev/null || true
+    }
 
-    # ── 2. 放行 loopback（锁定在第 2 条，本地服务依赖回环通信）──
-    iptables -C INPUT -i lo -j ACCEPT 2>/dev/null \
-        || iptables -I INPUT 2 -i lo -j ACCEPT 2>/dev/null || true
+    # ── 辅助：循环删除链中所有匹配的兜底规则（DROP / REJECT 各变种）──
+    flush_default_rules() {
+        local tbl="$1"   # iptables 或 ip6tables
+        # 循环删 DROP
+        while "$tbl" -D INPUT -j DROP 2>/dev/null; do :; done
+        # 循环删各种 REJECT 写法
+        while "$tbl" -D INPUT -j REJECT 2>/dev/null; do :; done
+        while "$tbl" -D INPUT -j REJECT --reject-with icmp-host-prohibited  2>/dev/null; do :; done
+        while "$tbl" -D INPUT -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do :; done
+        while "$tbl" -D INPUT -j REJECT --reject-with tcp-reset             2>/dev/null; do :; done
+    }
 
-    # ── 3. 放行 SSH 端口（锁定在第 3 条，不挤掉 ESTABLISHED / lo）──
+    # ── 1. 放行 ESTABLISHED/RELATED（锁定在第 1 条）──
+    iptables  -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
+        || iptables  -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+    ip6tables -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
+        || ip6tables -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+
+    # ── 2. 放行 loopback（锁定在第 2 条）──
+    iptables  -C INPUT -i lo -j ACCEPT 2>/dev/null \
+        || iptables  -I INPUT 2 -i lo -j ACCEPT 2>/dev/null || true
+    ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null \
+        || ip6tables -I INPUT 2 -i lo -j ACCEPT 2>/dev/null || true
+
+    # ── 3. 放行 SSH 端口（锁定在第 3 条）──
     local ssh_port
-    ssh_port=$(ss -tlnpH 2>/dev/null | grep 'sshd' | awk '{print $5}' \
-        | grep -oE '[0-9]+$' | head -1)
+    ssh_port=$(ss -tlnpH 2>/dev/null | grep 'sshd' \
+        | awk '{print $5}' | grep -oE '[0-9]+$' | head -1)
     if [ -z "$ssh_port" ]; then
         ssh_port=22
         yellow "警告：未检测到 sshd 监听端口，默认放行 22"
     fi
-    iptables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
-        || iptables -I INPUT 3 -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+    iptables  -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
+        || iptables  -I INPUT 3 -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+    ip6tables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
+        || ip6tables -I INPUT 3 -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
 
-    # ── 4. DROP 兜底（先删后追加，确保始终在链尾）──
-    iptables -D INPUT -j DROP 2>/dev/null || true
-    iptables -A INPUT -j DROP 2>/dev/null || true
+    # ── 4. 清空所有兜底规则（DROP / REJECT 全变种），稍后统一用 DROP 追加 ──
+    flush_default_rules iptables
+    flush_default_rules ip6tables
 
-    # ── 5. 持久化，并提示是否安装了加载服务 ──
-    mkdir -p /etc/iptables 2>/dev/null || true
-    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-    if ! systemctl is-enabled netfilter-persistent 2>/dev/null | grep -q enabled; then
-        yellow "警告：重启后规则可能不会自动恢复，建议安装 iptables-persistent"
-    fi
-
-    # ── 6. 扫描公网监听端口（分协议处理）──
+    # ── 5. 扫描公网监听端口，逐一询问是否放行 ──
     #   用 iptables -S 代替 iptables -L，输出永远是端口数字，不会出现服务名
     local accepted_tcp accepted_udp
     accepted_tcp=$(iptables -S INPUT 2>/dev/null \
@@ -1266,7 +1283,7 @@ setup_firewall_base() {
         proc=$(echo "$line"  | grep -oE 'users:\(\("[^"]+' \
             | grep -oE '"[^"]+' | tr -d '"')
 
-        # 过滤回环地址（127.x 和 ::1），通配符 * 表示监听所有接口，需要检查
+        # 过滤回环地址（127.x 和 ::1）
         echo "$addr" | grep -qE '^127\.|^\[::1\]:' && continue
 
         # 过滤 cloudflared / argo
@@ -1274,7 +1291,7 @@ setup_firewall_base() {
 
         [ -z "$port" ] && continue
 
-        # 按协议分别检查是否已放行
+        # 按协议检查是否已放行
         local already_accepted=false
         if [ "$proto" = "tcp" ]; then
             echo "$accepted_tcp" | grep -qx "$port" && already_accepted=true
@@ -1290,7 +1307,6 @@ setup_firewall_base() {
         echo ""
         yellow "检测到以下端口有进程监听但未在防火墙放行，逐一确认是否放行："
         local need_save=false
-        local insert_pos=4
         for entry in "${unknown_ports[@]}"; do
             local p_port p_proto p_proc
             p_port=$(echo "$entry"  | cut -d'|' -f1)
@@ -1301,11 +1317,14 @@ setup_firewall_base() {
             skyblue "  端口：${p_port}/${p_proto}  进程：${p_proc}"
             printf "  是否放行？[y/N] "
             local ans
-            read -r ans </dev/tty
+            read -r -t 30 ans </dev/tty || ans="n"
             case "$ans" in
                 [Yy]*)
-                    iptables -I INPUT "$insert_pos" -p "$p_proto" --dport "$p_port" -j ACCEPT 2>/dev/null || true
-                    insert_pos=$(( insert_pos + 1 ))
+                    # 删掉兜底 → 追加放行 → 重新追加兜底 DROP
+                    flush_default_rules iptables
+                    flush_default_rules ip6tables
+                    ipt -A INPUT -p "$p_proto" --dport "$p_port" -j ACCEPT
+                    ipt -A INPUT -j DROP
                     green "  已放行 ${p_port}/${p_proto}"
                     need_save=true
                     ;;
@@ -1315,14 +1334,38 @@ setup_firewall_base() {
             esac
         done
 
-        # 有新规则时重新持久化
         if $need_save; then
-            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            iptables-save  > /etc/iptables/rules.v4 2>/dev/null || true
+            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
             green "防火墙规则已更新并持久化"
         fi
+    else
+        # 没有需要询问的端口，直接追加兜底 DROP
+        ipt -A INPUT -j DROP
+    fi
+
+    # ── 6. 持久化，并提示/安装 netfilter-persistent ──
+    mkdir -p /etc/iptables 2>/dev/null || true
+    iptables-save  > /etc/iptables/rules.v4 2>/dev/null || true
+    ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+
+    if ! systemctl is-enabled netfilter-persistent 2>/dev/null | grep -q enabled; then
+        yellow "警告：重启后规则可能不会自动恢复"
+        printf "是否现在安装 iptables-persistent？[y/N] "
+        local ans_persist
+        read -r -t 30 ans_persist </dev/tty || ans_persist="n"
+        case "$ans_persist" in
+            [Yy]*)
+                apt-get install -y iptables-persistent 2>/dev/null \
+                    || yum install -y iptables-services 2>/dev/null \
+                    || yellow "自动安装失败，请手动安装 iptables-persistent"
+                ;;
+            *)
+                yellow "跳过，建议手动安装 iptables-persistent"
+                ;;
+        esac
     fi
 }
-
 
 # ── 安装流程 ──────────────────────────────────────
 do_install() {
