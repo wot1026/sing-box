@@ -241,7 +241,12 @@ install_singbox() {
         aarch64|arm64) arch='arm64' ;;
         *) red "不支持的架构: ${arch_raw}"; exit 1 ;;
     esac
-
+    
+    if ss -tlnH | awk '{print $5}' | grep -q ":${ARGO_PORT}$"; then
+        red "端口 ${ARGO_PORT} 已被占用，请修改 ARGO_PORT 后重试"
+        exit 1
+    fi
+    
     mkdir -p "${work_dir}" "${conf_dir}"
     chmod 700 "${work_dir}"
 
@@ -292,11 +297,6 @@ install_singbox() {
         hy2_port=$(pick_free_udp_port) || exit 1
         uuid=$(cat /proc/sys/kernel/random/uuid)
         vless_path="/${uuid}-vless"
-    fi
-
-    if ss -tlnH | awk '{print $5}' | grep -q ":${argo_port}$"; then
-        red "端口 ${argo_port} 已被占用，请修改 ARGO_PORT 后重试"
-        exit 1
     fi
 
     allow_port "${hy2_port}/udp"
@@ -1009,7 +1009,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
-    elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=_-]{100,500}$ ]]; then
+    elif [[ "$argo_auth" =~ ^[A-Za-z0-9+/=._-]{100,500}$ ]]; then
         printf '# token mode\nhostname: %s\n' "$argo_domain" > "${work_dir}/tunnel.yml"
         echo "$argo_auth" > "${work_dir}/argo_token"
         chmod 600 "${work_dir}/argo_token"
@@ -1231,16 +1231,16 @@ setup_firewall_base() {
 
     # 扫描公网监听端口，排除本地回环和已知端口，提示用户
     local accepted_ports
-    accepted_ports=$(iptables -L INPUT -n 2>/dev/null | grep -oP 'dpt:\K[0-9]+')
+    accepted_ports=$(iptables -L INPUT -n 2>/dev/null | grep -oE 'dpt:[0-9]+' | grep -oE '[0-9]+$')
     local unknown_ports=()
     while IFS= read -r line; do
         local addr port proto proc
         addr=$(echo "$line" | awk '{print $5}')
         port=$(echo "$addr" | grep -oE '[0-9]+$')
         proto=$(echo "$line" | awk '{print $1}')
-        proc=$(echo "$line" | grep -oP 'users:\(\("\K[^"]+')
+        proc=$(echo "$line" | grep -oE 'users:\(\("[^"]+' | grep -oE '"[^"]+' | tr -d '"')
         # 跳过本地监听（127.x, ::1）和通配符地址（cloudflared 等出站进程）
-        echo "$addr" | grep -qE '^127\.|^\[::1\]|\*:|^0\.0\.0\.0:' && continue
+        echo "$addr" | grep -qE '^127\.|^\[::1\]:|^\[::\]:|^\*:|^0\.0\.0\.0:' && continue
         # 跳过 cloudflared/argo 出站进程（端口随机，无需放行）
         echo "$proc" | grep -qE '^(cloudflared|argo)$' && continue
         # 跳过已在防火墙里的端口
