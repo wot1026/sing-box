@@ -1249,31 +1249,27 @@ _flush_default_rules() {
 setup_firewall_base() {
     # ── 0. 前置检查 ──
     if ! command -v iptables &>/dev/null; then
-    yellow "未检测到 iptables，正在安装…"
-    apt-get install -y iptables 2>/dev/null || { red "iptables 安装失败，跳过防火墙配置"; return; }
+        yellow "未检测到 iptables，正在安装…"
+        apt-get install -y iptables 2>/dev/null || { red "iptables 安装失败，跳过防火墙配置"; return; }
     fi
-    local hy2_port_reapply
-    hy2_port_reapply=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
-        "${conf_dir}/inbounds.json" 2>/dev/null)
-    [ -n "$hy2_port_reapply" ] && allow_port "${hy2_port_reapply}/udp"
     # 非 root 时 ss 看不到进程名，提前警告
     if [ "$(id -u)" -ne 0 ]; then
         yellow "警告：当前非 root，进程名将无法显示"
     fi
 
-    # ── 1. 放行 ESTABLISHED/RELATED（锁定在第 1 条）──
-    iptables  -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
-        || iptables  -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
-    ip6tables -C INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null \
-        || ip6tables -I INPUT 1 -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+    # ── 1. 清空 INPUT 链，从干净状态按顺序重建 ──
+    iptables  -F INPUT 2>/dev/null || true
+    ip6tables -F INPUT 2>/dev/null || true
 
-    # ── 2. 放行 loopback（锁定在第 2 条）──
-    iptables  -C INPUT -i lo -j ACCEPT 2>/dev/null \
-        || iptables  -I INPUT 2 -i lo -j ACCEPT 2>/dev/null || true
-    ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null \
-        || ip6tables -I INPUT 2 -i lo -j ACCEPT 2>/dev/null || true
+    # ── 2. 放行 ESTABLISHED/RELATED（第 1 条）──
+    iptables  -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+    ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
 
-    # ── 3. 放行 SSH 端口（锁定在第 3 条）──
+    # ── 3. 放行 loopback（第 2 条）──
+    iptables  -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+    ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+
+    # ── 4. 放行 SSH 端口（第 3 条）──
     local ssh_port
     ssh_port=$(ss -tlnpH 2>/dev/null | awk '/sshd/{print $4}' | grep -oE '[0-9]+$' | head -1)
     [ -z "$ssh_port" ] && ssh_port=$(grep -E '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
@@ -1281,16 +1277,18 @@ setup_firewall_base() {
         ssh_port=22
         yellow "警告：未检测到 sshd 监听端口，默认放行 22"
     fi
-    iptables  -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
-        || iptables  -I INPUT 3 -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
-    ip6tables -C INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null \
-        || ip6tables -I INPUT 3 -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+    iptables  -A INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+    ip6tables -A INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
 
-    # ── 4. 清空所有兜底规则，稍后统一在链尾追加 DROP ──
-    _flush_default_rules iptables
-    _flush_default_rules ip6tables
+    # ── 5. 放行 hy2 端口（从 inbounds.json 读取）──
+    local hy2_port_reapply
+    hy2_port_reapply=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port'         "${conf_dir}/inbounds.json" 2>/dev/null)
+    if [ -n "$hy2_port_reapply" ] && [ "$hy2_port_reapply" != "null" ]; then
+        iptables  -A INPUT -p udp --dport "$hy2_port_reapply" -j ACCEPT 2>/dev/null || true
+        ip6tables -A INPUT -p udp --dport "$hy2_port_reapply" -j ACCEPT 2>/dev/null || true
+    fi
 
-    # ── 5. 扫描公网监听端口，收集未放行的端口 ──
+    # ── 6. 扫描公网监听端口，收集未放行的端口 ──
     # IPv4 和 IPv6 已放行端口分别查询，独立判断
     local accepted4_tcp accepted4_udp accepted6_tcp accepted6_udp
     accepted4_tcp=$(iptables  -S INPUT 2>/dev/null \
