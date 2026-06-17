@@ -1252,6 +1252,10 @@ setup_firewall_base() {
         yellow "未检测到 iptables，正在安装…"
         apt-get install -y iptables 2>/dev/null || { red "iptables 安装失败，跳过防火墙配置"; return; }
     fi
+    if command_exists ufw && ufw status | grep -q "Status: active"; then
+        yellow "检测到 UFW 已启用，跳过 iptables 直接管理"
+        return
+    fi
     # 非 root 时 ss 看不到进程名，提前警告
     if [ "$(id -u)" -ne 0 ]; then
         yellow "警告：当前非 root，进程名将无法显示"
