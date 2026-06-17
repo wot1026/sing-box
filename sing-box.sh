@@ -76,17 +76,6 @@ allow_port() {
 
     [ $has_ufw -eq 1 ] && ufw --force default allow outgoing >/dev/null 2>&1
 
-    if [ $has_iptables -eq 1 ]; then
-        iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
-        iptables -C INPUT -p icmp -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        iptables -C INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-    fi
-    if [ $has_ip6tables -eq 1 ]; then
-        ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || ip6tables -I INPUT -i lo -j ACCEPT 2>/dev/null || true
-        ip6tables -C INPUT -p icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p icmp -j ACCEPT 2>/dev/null || true
-        ip6tables -C INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || ip6tables -I INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-    fi
-
     for rule in "$@"; do
         local port="${rule%/*}" proto="${rule#*/}"
         [ $has_ufw -eq 1 ] && ufw allow in "${port}/${proto}" >/dev/null 2>&1
