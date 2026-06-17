@@ -1241,7 +1241,6 @@ _flush_default_rules() {
     command -v "$tbl" &>/dev/null || return 1
 
     while "$tbl" -D INPUT -j DROP                                        2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT                                      2>/dev/null; do :; done
     while "$tbl" -D INPUT -j REJECT --reject-with icmp-host-prohibited   2>/dev/null; do :; done
     while "$tbl" -D INPUT -j REJECT --reject-with icmp-port-unreachable  2>/dev/null; do :; done
     while "$tbl" -D INPUT -j REJECT --reject-with tcp-reset              2>/dev/null; do :; done
