@@ -1232,19 +1232,6 @@ menu() {
 }
 
 # ── 安装后防火墙收尾 ─────────────────────────────
-# ── 辅助：循环删除 INPUT 链中所有兜底规则（DROP / REJECT 各变种）──
-_flush_default_rules() {
-    local tbl="$1"
-
-    # 空值保护 + 命令存在性检查，防止无限循环
-    [[ -z "$tbl" ]] && return 1
-    command -v "$tbl" &>/dev/null || return 1
-
-    while "$tbl" -D INPUT -j DROP                                        2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT --reject-with icmp-host-prohibited   2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT --reject-with icmp-port-unreachable  2>/dev/null; do :; done
-    while "$tbl" -D INPUT -j REJECT --reject-with tcp-reset              2>/dev/null; do :; done
-}
 
 setup_firewall_base() {
     # ── 0. 前置检查 ──
@@ -1483,9 +1470,6 @@ do_install() {
     ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file" || rm -f "$tmp_file"
     restart_singbox
     green "大陆域名拦截已默认开启"
-    setup_firewall_base
-    green "\nsing-box 安装完成！"
-
     setup_firewall_base
     green "\nsing-box 安装完成！"
 
