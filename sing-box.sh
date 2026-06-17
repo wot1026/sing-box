@@ -1474,6 +1474,28 @@ do_install() {
     else
         yellow "警告：inbounds.json 未落盘，保留备份目录以供重试"
     fi
+# 默认开启大陆域名拦截
+    local route_file="${conf_dir}/route.json"
+    local tmp_file
+    tmp_file=$(mktemp)
+    jq '
+      .route.rule_set += [{"type":"remote","tag":"geosite-cn","format":"binary",
+        "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+        "download_detour":"direct"}] |
+      .route.rules = [
+        {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn",
+          "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com",
+          "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com",
+          "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],
+         "outbound":"direct"},
+        {"rule_set":["geosite-cn"],"outbound":"block"}
+      ] + .route.rules
+    ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file" || rm -f "$tmp_file"
+    restart_singbox
+    green "大陆域名拦截已默认开启"
+    setup_firewall_base
+    green "\nsing-box 安装完成！"
+
     setup_firewall_base
     green "\nsing-box 安装完成！"
 
