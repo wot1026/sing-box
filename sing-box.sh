@@ -228,18 +228,17 @@ pick_free_udp_port() {
     port=$(shuf -i 10000-65000 -n 1)
     while ss -ulnH | awk '{print $5}' | grep -q ":${port}$"; do
         port=$(shuf -i 10000-65000 -n 1)
-        (( attempts++ > 100 )) && { red "无法找到空闲 UDP 端口"; return 1; }
+        (( attempts++ > 100 )) && { echo "无法找到空闲 UDP 端口" >&2; return 1; }
     done
     echo "$port"
 }
-
 # ── 查找未被占用的 TCP 端口 ───────────────────────
 pick_free_tcp_port() {
     local port attempts=0
     port=$(shuf -i 10000-65000 -n 1)
     while ss -tlnH | awk '{print $5}' | grep -q ":${port}$"; do
         port=$(shuf -i 10000-65000 -n 1)
-        (( attempts++ > 100 )) && { red "无法找到空闲 TCP 端口"; return 1; }
+        (( attempts++ > 100 )) && { echo "无法找到空闲 TCP 端口" >&2; return 1; }
     done
     echo "$port"
 }
@@ -260,8 +259,11 @@ install_singbox() {
     esac
     
     if ss -tlnH | awk '{print $5}' | grep -q ":${ARGO_PORT}$"; then
-        red "端口 ${ARGO_PORT} 已被占用，请修改 ARGO_PORT 后重试"
-        exit 1
+        yellow "端口 ${ARGO_PORT} 已被占用，自动选用空闲 TCP 端口"
+        local new_argo_port
+        new_argo_port=$(pick_free_tcp_port) || { red "无法分配空闲 TCP 端口"; exit 1; }
+        ARGO_PORT="$new_argo_port"
+        green "VLESS-Argo 端口已切换到 ${ARGO_PORT}"
     fi
     
     mkdir -p "${work_dir}" "${conf_dir}"
@@ -805,13 +807,12 @@ change_config() {
                ! [[ "$new_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
                 red "UUID 格式不合法"; sleep 1; return
             fi
-
             local tmp_file
             tmp_file=$(mktemp)
+            # 仅修改 VLESS 的 UUID 和 path，不再覆盖 hy2 密码（hy2 密码独立维护）
             jq --arg u "$new_uuid" --arg p "/${new_uuid}-vless" '
-                (.inbounds[] | select(.type=="vless")     | .users[] | .uuid)     = $u |
-                (.inbounds[] | select(.type=="vless")     | .transport.path)      = $p |
-                (.inbounds[] | select(.type=="hysteria2") | .users[] | .password) = $u
+                (.inbounds[] | select(.type=="vless") | .users[] | .uuid) = $u |
+                (.inbounds[] | select(.type=="vless") | .transport.path) = $p
             ' "$inbounds_file" > "$tmp_file"
             if [ $? -ne 0 ] || [ ! -s "$tmp_file" ]; then
                 rm -f "$tmp_file"; red "配置文件写入失败，请检查！"; sleep 2; return
@@ -1376,6 +1377,13 @@ setup_firewall_base() {
         green "  已放行 ${p_port}/${p_proto}"
     done
 
+     # ── 7.5 DROP 兜底前给用户 5 秒撤销窗口 ──
+    echo ""
+    yellow "5 秒后将启用 INPUT 链 DROP 兜底规则"
+    yellow "如有异常请按 Ctrl+C 中止，然后执行："
+    yellow "    iptables -P INPUT ACCEPT && iptables -F INPUT"
+    yellow "    ip6tables -P INPUT ACCEPT && ip6tables -F INPUT"
+    sleep 5
     # 无论用户是否放行了端口，都追加 DROP 兜底
     iptables  -A INPUT -j DROP 2>/dev/null || true
     ip6tables -A INPUT -j DROP 2>/dev/null || true
@@ -1424,10 +1432,14 @@ setup_firewall_base() {
     else
         yellow "警告：非 systemd 系统，请手动确保 iptables 规则开机加载"
     fi
-
+    # ── 10. 兼容 fail2ban：iptables -F INPUT 会清掉 fail2ban 的 jump 规则 ──
+    if command -v systemctl &>/dev/null && systemctl is-active fail2ban &>/dev/null; then
+        yellow "检测到 fail2ban 正在运行，重新加载以恢复 jump 规则…"
+        systemctl reload fail2ban 2>/dev/null || systemctl restart fail2ban 2>/dev/null || \
+            yellow "fail2ban reload 失败，请手动执行 systemctl restart fail2ban"
+    fi
     green "防火墙规则已配置完成"
 }
-
 # ── 安装流程 ──────────────────────────────────────
 do_install() {
     TUNNEL_FULLY_RESTORED=false
