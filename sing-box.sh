@@ -272,7 +272,7 @@ install_singbox() {
 
     apt-get install -y qrencode 2>/dev/null || yellow "qrencode 安装失败，二维码功能不可用"
 
-    local hy2_port uuid vless_path argo_port="${ARGO_PORT}"
+    local hy2_port uuid vless_path argo_port="${ARGO_PORT}" hy2_password
     local restore_backup=false
 
     # ── 检测是否存在卸载时保留的备份配置 ──────────
@@ -290,6 +290,9 @@ install_singbox() {
         vless_path=$(jq -r '.inbounds[] | select(.type=="vless") | .transport.path' "${backup_dir}/inbounds.json")
         hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${backup_dir}/inbounds.json")
         argo_port=$(jq -r '.inbounds[] | select(.type=="vless") | .listen_port' "${backup_dir}/inbounds.json")
+        hy2_password=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .users[0].password' "${backup_dir}/inbounds.json")
+        # 兼容旧备份（密码与UUID相同的历史配置）：若读取失败则回退使用 uuid
+        [ -z "$hy2_password" ] || [ "$hy2_password" = "null" ] && hy2_password="$uuid"
 
         if [ -z "$uuid" ] || [ "$uuid" = "null" ] \
            || [ -z "$vless_path" ] || [ "$vless_path" = "null" ] \
@@ -314,6 +317,7 @@ install_singbox() {
         hy2_port=$(pick_free_udp_port) || exit 1
         uuid=$(cat /proc/sys/kernel/random/uuid)
         vless_path="/${uuid}-vless"
+        hy2_password=$(openssl rand -hex 16)
     fi
 
     allow_port "${hy2_port}/udp"
@@ -395,7 +399,7 @@ EOF
       "tag": "hysteria2",
       "listen": "0.0.0.0",
       "listen_port": ${hy2_port},
-      "users": [{"password": "${uuid}"}],
+      "users": [{"password": "${hy2_password}"}],
       "ignore_client_bandwidth": false,
       "masquerade": "https://bing.com",
       "tls": {
@@ -584,6 +588,7 @@ manage_service() {
     case "$action" in
         start)
             yellow "正在启动 ${name}…"
+            systemctl daemon-reload
             systemctl start "$name"
             systemctl is-active "$name" &>/dev/null && green "${name} 已启动" || red "${name} 启动失败"
             ;;
@@ -732,10 +737,10 @@ cn_block_manage() {
                 "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
                 "download_detour":"direct"}] |
               .route.rules = [
-                {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn",
-                  "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com",
-                  "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com",
-                  "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],
+                {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn$",
+                  "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com$",
+                  "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com$",
+                  "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com$"],
                  "outbound":"direct"},
                 {"rule_set":["geosite-cn"],"outbound":"block"}
               ] + .route.rules
@@ -1460,10 +1465,10 @@ do_install() {
         "url":"https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
         "download_detour":"direct"}] |
       .route.rules = [
-        {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn",
-          "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com",
-          "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com",
-          "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com"],
+        {"domain_regex":["^([a-zA-Z0-9_-]+\\.)*googleapis\\.cn$",
+          "^([a-zA-Z0-9_-]+\\.)*googleapis\\.com$",
+          "^([a-zA-Z0-9_-]+\\.)*gstatic\\.com$",
+          "^([a-zA-Z0-9_-]+\\.)*xn--ngstr-lra8j\\.com$"],
          "outbound":"direct"},
         {"rule_set":["geosite-cn"],"outbound":"block"}
       ] + .route.rules
