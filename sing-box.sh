@@ -641,9 +641,12 @@ get_info() {
 
     clear
 
-    local hy2_port uuid fingerprint
+    local hy2_port uuid hy2_password fingerprint
     hy2_port=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' "${conf_dir}/inbounds.json")
     uuid=$(jq -r '.inbounds[] | select(.type=="vless") | .users[0].uuid' "${conf_dir}/inbounds.json")
+    hy2_password=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .users[0].password' "${conf_dir}/inbounds.json")
+    # 兼容旧配置（密码与UUID相同的历史配置）：若读取失败则回退使用 uuid
+    [ -z "$hy2_password" ] || [ "$hy2_password" = "null" ] && hy2_password="$uuid"
 
     fingerprint=$(get_hy2_fingerprint)
     if [ -z "$fingerprint" ]; then
@@ -661,7 +664,7 @@ get_info() {
     if [ -z "$argodomain" ]; then
         yellow "未检测到固定隧道域名，VLESS 节点暂不可用，请先配置 Argo 固定隧道\n"
         cat > "${client_dir}" << EOF
-hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+hysteria2://${hy2_password}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     else
         green "\nArgo 域名：${argodomain}\n"
@@ -675,7 +678,7 @@ EOF
         cat > "${client_dir}" << EOF
 vless://${uuid}@${CFIP}:${_port}?encryption=none&security=tls&sni=${argodomain}&fp=chrome&type=ws&host=${argodomain}&path=${encoded_path}#${node_prefix} argo
 
-hysteria2://${uuid}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
+hysteria2://${hy2_password}@${server_ip}:${hy2_port}?sni=bing.com&pinSHA256=${fingerprint}&alpn=h3#${node_prefix} hy2
 EOF
     fi
 
@@ -1255,6 +1258,9 @@ setup_firewall_base() {
     fi
 
     # ── 1. 清空 INPUT 链，从干净状态按顺序重建 ──
+    # 先确保 policy 为 ACCEPT，避免在 DROP policy 下清空造成瞬间断连
+    iptables  -P INPUT ACCEPT 2>/dev/null || true
+    ip6tables -P INPUT ACCEPT 2>/dev/null || true
     iptables  -F INPUT 2>/dev/null || true
     ip6tables -F INPUT 2>/dev/null || true
 
@@ -1484,9 +1490,15 @@ do_install() {
          "outbound":"direct"},
         {"rule_set":["geosite-cn"],"outbound":"block"}
       ] + .route.rules
-    ' "$route_file" > "$tmp_file" && mv "$tmp_file" "$route_file" || rm -f "$tmp_file"
-    restart_singbox
-    green "大陆域名拦截已默认开启"
+    ' "$route_file" > "$tmp_file"
+    if [ $? -eq 0 ] && [ -s "$tmp_file" ] && jq empty "$tmp_file" 2>/dev/null; then
+        mv "$tmp_file" "$route_file"
+        restart_singbox
+        green "大陆域名拦截已默认开启"
+    else
+        rm -f "$tmp_file"
+        yellow "大陆域名拦截配置失败，已跳过（不影响核心功能）"
+    fi
     setup_firewall_base
     green "\nsing-box 安装完成！"
 
