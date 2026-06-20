@@ -527,7 +527,12 @@ EOF
 
 # ── 根据 tunnel.yml 重建 argo.service（用于恢复备份场景）──
 _rebuild_argo_service_from_tunnel_yml() {
-    if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
+    # JSON 凭据模式：tunnel.yml 内含 credentials-file 字段
+    local is_json_mode=false
+    grep -q '^credentials-file:' "${work_dir}/tunnel.yml" 2>/dev/null && is_json_mode=true
+
+    if ! $is_json_mode; then
+        # Token 模式
         if [ ! -f "${work_dir}/argo_token" ]; then
             local argo_domain
             argo_domain=$(get_fixed_domain)
@@ -873,7 +878,7 @@ change_config() {
             fi
             mv "$tmp_file" "$inbounds_file"
             if [ -f "${work_dir}/tunnel.yml" ]; then
-                if grep -q '^# token mode' "${work_dir}/tunnel.yml" 2>/dev/null; then
+                if [ -f "${work_dir}/argo_token" ] && [ ! -f "${work_dir}/tunnel.json" ]; then
                     yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
                 else
                     sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
@@ -1452,7 +1457,7 @@ do_install() {
     BACKUP_SUCCESS=false
     TUNNEL_TOKEN_MODE=false
 
-    install_packages jq openssl curl
+    install_packages jq openssl curl || { red "基础依赖安装失败，请检查网络或软件源"; exit 1; }
 
     yellow "正在查询 sing-box 最新版本…"
     local install_ver
