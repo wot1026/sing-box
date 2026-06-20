@@ -1364,11 +1364,11 @@ setup_firewall_base() {
 
             echo ""
             skyblue "  端口：${p_port}/${p_proto}  进程：${p_proc}"
-            printf "  是否放行？[y/N]（30 秒后自动跳过） "
-            read -r -t 30 reply </dev/tty || reply="n"
+            printf "  是否放行？[Y/n] "
+            read -r reply </dev/tty
             case "$reply" in
-                [Yy]*) ports_to_allow+=("${p_port}|${p_proto}") ;;
-                *)     yellow "  跳过 ${p_port}/${p_proto}" ;;
+                [Nn]*) yellow "  跳过 ${p_port}/${p_proto}" ;;
+                *)     ports_to_allow+=("${p_port}|${p_proto}") ;;
             esac
         done
     fi
