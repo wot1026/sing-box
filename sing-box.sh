@@ -853,28 +853,28 @@ change_config() {
                 rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
             fi
             mv "$tmp_file" "$inbounds_file"
-            # 删旧端口规则
-            remove_port "${old_port}/udp"
-            # 摘下 DROP 兜底 → 追加新端口 → 重新压入 DROP
-            iptables  -D INPUT -j DROP  2>/dev/null || true
-            ip6tables -D INPUT -j DROP  2>/dev/null || true
-            iptables  -A INPUT -p udp --dport "$new_port" -j ACCEPT 2>/dev/null || true
-            ip6tables -A INPUT -p udp --dport "$new_port" -j ACCEPT 2>/dev/null || true
-            iptables  -A INPUT -j DROP  2>/dev/null || true
-            ip6tables -A INPUT -j DROP  2>/dev/null || true
-            # 持久化
+            # 删旧端口规则（IPv4，精确删除避免误伤）
+            iptables -D INPUT -p udp --dport "$old_port" -j ACCEPT 2>/dev/null || true
+
+            # 摘下 DROP 兜底 → 追加新端口 → 重新压入 DROP（只操作 IPv4，v6 全 DROP 不动）
+            iptables -D INPUT -j DROP 2>/dev/null || true
+            iptables -A INPUT -p udp --dport "$new_port" -j ACCEPT 2>/dev/null || true
+            iptables -A INPUT -j DROP 2>/dev/null || true
+
+            # 持久化（只存 IPv4，v6 规则固定不变）
             mkdir -p /etc/iptables
-            local _t4 _t6
+            local _t4
             _t4=$(mktemp)
-            iptables-save  > "$_t4" 2>/dev/null && mv "$_t4" /etc/iptables/rules.v4 \
-                || { rm -f "$_t4"; yellow "保存 rules.v4 失败"; }
-            _t6=$(mktemp)
-            ip6tables-save > "$_t6" 2>/dev/null && mv "$_t6" /etc/iptables/rules.v6 \
-                || { rm -f "$_t6"; yellow "保存 rules.v6 失败"; }
+            if [ -n "$_t4" ] && iptables-save > "$_t4" 2>/dev/null; then
+                mv "$_t4" /etc/iptables/rules.v4
+            else
+                rm -f "$_t4"
+                yellow "保存 rules.v4 失败"
+            fi
+
             restart_singbox && get_info
             green "\nHysteria2 端口已修改为：${new_port}\n"
             ;;
-
         3)
             reading "\n请输入新的 VLESS-Argo 端口（回车随机生成）: " new_port
             [ -z "$new_port" ] && new_port=$(pick_free_tcp_port)
@@ -1273,95 +1273,122 @@ setup_firewall_base() {
         yellow "检测到 UFW 已启用，跳过 iptables 直接管理"
         return
     fi
-    # 非 root 时 ss 看不到进程名，提前警告
     if [ "$(id -u)" -ne 0 ]; then
         yellow "警告：当前非 root，进程名将无法显示"
     fi
 
-    # ── 1. 清空 INPUT 链，从干净状态按顺序重建 ──
-    # 先确保 policy 为 ACCEPT，避免在 DROP policy 下清空造成瞬间断连
-    iptables  -P INPUT ACCEPT 2>/dev/null || true
+    # ── 1. 禁用 IPv6（内核层，使用 sysctl.d 覆盖云厂商配置）──
+    if [ ! -f /etc/sysctl.d/99-disable-ipv6.conf ]; then
+        yellow "检测到未禁用 IPv6，正在禁用…"
+        cat > /etc/sysctl.d/99-disable-ipv6.conf << 'EOF'
+# 禁用 IPv6（sing-box 脚本添加）
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+net.ipv6.conf.lo.disable_ipv6 = 1
+EOF
+        sysctl --system &>/dev/null
+
+        # 验证是否真的禁用
+        if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]; then
+            green "IPv6 已在内核层禁用"
+        else
+            yellow "警告：IPv6 禁用可能未生效，请检查 /etc/sysctl.d/ 下是否有冲突配置"
+        fi
+
+        # sshd 只监听 IPv4（reload 不断当前连接）
+        if ! grep -q "^AddressFamily inet" /etc/ssh/sshd_config; then
+            sed -i '/^AddressFamily/d' /etc/ssh/sshd_config
+            echo "AddressFamily inet" >> /etc/ssh/sshd_config
+            if sshd -t 2>/dev/null; then
+                systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+                green "sshd 已设置为仅监听 IPv4（reload）"
+            else
+                yellow "sshd 配置测试失败，回滚 AddressFamily 设置"
+                sed -i '/^AddressFamily inet/d' /etc/ssh/sshd_config
+            fi
+        fi
+    fi
+
+    # ── 2. IPv6 防火墙：直接全 DROP，无需维护具体规则 ──
     ip6tables -P INPUT ACCEPT 2>/dev/null || true
-    iptables  -F INPUT 2>/dev/null || true
     ip6tables -F INPUT 2>/dev/null || true
-
-    # ── 2. 放行 ESTABLISHED/RELATED（第 1 条）──
-    iptables  -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
-    ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
-
-    # ── 3. 放行 loopback（第 2 条）──
-    iptables  -A INPUT -i lo -j ACCEPT 2>/dev/null || true
     ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+    ip6tables -A INPUT -j DROP 2>/dev/null || true
 
-    # ── 4. 放行 SSH 端口（第 3 条）──
+    # ── 3. 清空 IPv4 INPUT 链，重建 ──
+    iptables -P INPUT ACCEPT 2>/dev/null || true
+    iptables -F INPUT 2>/dev/null || true
+
+    # ── 4. 放行 ESTABLISHED/RELATED ──
+    iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+
+    # ── 5. 丢弃 INVALID 包（防扫描/异常包）──
+    iptables -A INPUT -m conntrack --ctstate INVALID -j DROP 2>/dev/null || true
+
+    # ── 6. 放行 loopback ──
+    iptables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+
+    # ── 7. ICMP 限速（防 ping flood，正常 ping 不受影响）──
+    iptables -A INPUT -p icmp --icmp-type echo-request \
+        -m limit --limit 1/s --limit-burst 5 -j ACCEPT 2>/dev/null || true
+    iptables -A INPUT -p icmp -j DROP 2>/dev/null || true
+
+    # ── 8. 放行 SSH 端口（优先 sshd_config，兜底 ss 探测）──
     local ssh_port
-    ssh_port=$(ss -tlnpH 2>/dev/null | awk '/sshd/{print $4}' | grep -oE '[0-9]+$' | head -1)
-    [ -z "$ssh_port" ] && ssh_port=$(grep -E '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+    ssh_port=$(grep -E '^[[:space:]]*Port[[:space:]]+' /etc/ssh/sshd_config 2>/dev/null \
+        | awk '{print $2}' | head -1)
+    [ -z "$ssh_port" ] && ssh_port=$(ss -tlnpH 2>/dev/null \
+        | awk '/sshd/{print $4}' | grep -oE '[0-9]+$' | sort -u | head -1)
     if [ -z "$ssh_port" ]; then
         ssh_port=22
         yellow "警告：未检测到 sshd 监听端口，默认放行 22"
     fi
-    iptables  -A INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
-    ip6tables -A INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
+    iptables -A INPUT -p tcp --dport "$ssh_port" -j ACCEPT 2>/dev/null || true
 
-    # ── 5. 放行 hy2 端口（从 inbounds.json 读取）──
+    # ── 9. 放行 hy2 端口 ──
     local hy2_port_reapply
-    hy2_port_reapply=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port'         "${conf_dir}/inbounds.json" 2>/dev/null)
+    hy2_port_reapply=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' \
+        "${conf_dir}/inbounds.json" 2>/dev/null)
     if [ -n "$hy2_port_reapply" ] && [ "$hy2_port_reapply" != "null" ]; then
-        iptables  -A INPUT -p udp --dport "$hy2_port_reapply" -j ACCEPT 2>/dev/null || true
-        ip6tables -A INPUT -p udp --dport "$hy2_port_reapply" -j ACCEPT 2>/dev/null || true
+        iptables -A INPUT -p udp --dport "$hy2_port_reapply" -j ACCEPT 2>/dev/null || true
     fi
 
-    # ── 6. 扫描公网监听端口，收集未放行的端口 ──
-    # IPv4 和 IPv6 已放行端口分别查询，独立判断
-    local accepted4_tcp accepted4_udp accepted6_tcp accepted6_udp
-    accepted4_tcp=$(iptables  -S INPUT 2>/dev/null \
+    # ── 10. 扫描其他公网监听端口（只检测 IPv4）──
+    local accepted4_tcp accepted4_udp
+    accepted4_tcp=$(iptables -S INPUT 2>/dev/null \
         | grep ' -p tcp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
-    accepted4_udp=$(iptables  -S INPUT 2>/dev/null \
-        | grep ' -p udp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
-    accepted6_tcp=$(ip6tables -S INPUT 2>/dev/null \
-        | grep ' -p tcp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
-    accepted6_udp=$(ip6tables -S INPUT 2>/dev/null \
+    accepted4_udp=$(iptables -S INPUT 2>/dev/null \
         | grep ' -p udp ' | grep -oE -- '--dport [0-9]+' | awk '{print $2}')
 
     local unknown_ports=()
-    # 循环内用到的变量统一提到循环外
-    local addr port proto proc already4 already6 dup_key is_dup existing
+    local addr port proto proc already dup_key is_dup existing
     while IFS= read -r line; do
         addr=$(echo "$line"  | awk '{print $5}')
         port=$(echo "$addr"  | grep -oE '[0-9]+$')
-
-        # sed 's/6$//' 只去掉末尾的 6，tcp6→tcp，udp6→udp
         proto=$(echo "$line" | awk '{print $1}' | sed 's/6$//')
-
         proc=$(echo "$line"  | grep -oE 'users:\(\("[^"]+' \
             | grep -oE '"[^"]+' | tr -d '"')
 
-        # 修复2：兼容 [::1] 无端口后缀的写法
+        # 跳过 loopback
         echo "$addr" | grep -qE '^127\.|^\[::1\][:\[]?|^::1[:\[]' && continue
-
+        # 跳过 IPv6 监听（反正全 DROP 了）
+        echo "$addr" | grep -qE '^\[' && continue
+        # 跳过 argo
         echo "$proc" | grep -qE '(cloudflared|argo)' && continue
 
-        # 端口为空（含通配符 * 的行）打印警告后跳过
         if [ -z "$port" ]; then
             yellow "  警告：无法解析端口，跳过：$line"
             continue
         fi
 
-        # 分别对 IPv4/IPv6 规则集判断是否已放行
-        already4=false
-        already6=false
+        already=false
         if [ "$proto" = "tcp" ]; then
-            echo "$accepted4_tcp" | grep -qx "$port" && already4=true
-            echo "$accepted6_tcp" | grep -qx "$port" && already6=true
+            echo "$accepted4_tcp" | grep -qx "$port" && already=true
         elif [ "$proto" = "udp" ]; then
-            echo "$accepted4_udp" | grep -qx "$port" && already4=true
-            echo "$accepted6_udp" | grep -qx "$port" && already6=true
+            echo "$accepted4_udp" | grep -qx "$port" && already=true
         fi
+        [[ "$already" == true ]] && continue
 
-        [[ "$already4" == true && "$already6" == true ]] && continue
-
-        # 修复6：双栈场景下 tcp+tcp6 会产生重复条目，去重后只问一次
         dup_key="${port}|${proto}"
         is_dup=false
         for existing in "${unknown_ports[@]}"; do
@@ -1372,7 +1399,7 @@ setup_firewall_base() {
         unknown_ports+=("${port}|${proto}|${proc:-unknown}")
     done < <(ss -tlunpH 2>/dev/null)
 
-    # ── 6. 逐一询问，收集用户选择放行的端口 ──
+    # ── 11. 逐一询问 ──
     local ports_to_allow=()
     if [ ${#unknown_ports[@]} -gt 0 ]; then
         echo ""
@@ -1382,7 +1409,6 @@ setup_firewall_base() {
             p_port=$(echo "$entry"  | cut -d'|' -f1)
             p_proto=$(echo "$entry" | cut -d'|' -f2)
             p_proc=$(echo "$entry"  | cut -d'|' -f3)
-
             echo ""
             skyblue "  端口：${p_port}/${p_proto}  进程：${p_proc}"
             printf "  是否放行？[Y/n] "
@@ -1394,31 +1420,29 @@ setup_firewall_base() {
         done
     fi
 
-    # ── 7. 统一追加放行规则，最后追加 DROP ──
+    # ── 12. 追加放行 ──
     for entry in "${ports_to_allow[@]}"; do
         local p_port p_proto
         p_port=$(echo "$entry"  | cut -d'|' -f1)
         p_proto=$(echo "$entry" | cut -d'|' -f2)
-        iptables  -A INPUT -p "$p_proto" --dport "$p_port" -j ACCEPT 2>/dev/null || true
-        ip6tables -A INPUT -p "$p_proto" --dport "$p_port" -j ACCEPT 2>/dev/null || true
+        iptables -A INPUT -p "$p_proto" --dport "$p_port" -j ACCEPT 2>/dev/null || true
         green "  已放行 ${p_port}/${p_proto}"
     done
 
-     # ── 7.5 DROP 兜底前给用户 5 秒撤销窗口 ──
+    # ── 13. DROP 兜底前给用户撤销窗口 ──
     echo ""
     yellow "5 秒后将启用 INPUT 链 DROP 兜底规则"
     yellow "如有异常请按 Ctrl+C 中止，然后执行："
     yellow "    iptables -P INPUT ACCEPT && iptables -F INPUT"
-    yellow "    ip6tables -P INPUT ACCEPT && ip6tables -F INPUT"
     sleep 5
-    # 无论用户是否放行了端口，都追加 DROP 兜底
-    iptables  -A INPUT -j DROP 2>/dev/null || true
-    ip6tables -A INPUT -j DROP 2>/dev/null || true
+    iptables -A INPUT -j DROP 2>/dev/null || true
 
-    # ── 8. 持久化 ──
-    # 用 tmpfile + mv，防止 iptables-save 失败时清空原文件
+    # ── 14. 设置默认策略为 DROP（更规范）──
+    iptables  -P INPUT DROP 2>/dev/null || true
+    ip6tables -P INPUT DROP 2>/dev/null || true
+
+    # ── 15. 持久化 ──
     mkdir -p /etc/iptables 2>/dev/null || true
-
     local tmp4 tmp6
     tmp4=$(mktemp 2>/dev/null)
     if [ -n "$tmp4" ] && iptables-save > "$tmp4" 2>/dev/null; then
@@ -1427,7 +1451,6 @@ setup_firewall_base() {
         rm -f "$tmp4"
         yellow "保存 rules.v4 失败"
     fi
-
     tmp6=$(mktemp 2>/dev/null)
     if [ -n "$tmp6" ] && ip6tables-save > "$tmp6" 2>/dev/null; then
         mv "$tmp6" /etc/iptables/rules.v6
@@ -1436,8 +1459,7 @@ setup_firewall_base() {
         yellow "保存 rules.v6 失败"
     fi
 
-    # ── 9. 持久化服务检查 ──
-    # 修复5：非 systemd 系统上 systemctl 不存在，分开处理避免误判
+    # ── 16. 持久化服务检查 ──
     if command -v systemctl &>/dev/null; then
         if ! systemctl is-enabled netfilter-persistent 2>/dev/null | grep -q enabled; then
             yellow "警告：重启后规则可能不会自动恢复"
@@ -1447,8 +1469,6 @@ setup_firewall_base() {
             case "$ans_persist" in
                 [Yy]*)
                     apt-get install -y iptables-persistent 2>/dev/null \
-                        || dnf install -y iptables-services 2>/dev/null \
-                        || yum install -y iptables-services 2>/dev/null \
                         || yellow "自动安装失败，请手动安装 iptables-persistent"
                     ;;
                 *)
@@ -1456,15 +1476,15 @@ setup_firewall_base() {
                     ;;
             esac
         fi
-    else
-        yellow "警告：非 systemd 系统，请手动确保 iptables 规则开机加载"
     fi
-    # ── 10. 兼容 fail2ban：iptables -F INPUT 会清掉 fail2ban 的 jump 规则 ──
+
+    # ── 17. fail2ban 兼容 ──
     if command -v systemctl &>/dev/null && systemctl is-active fail2ban &>/dev/null; then
         yellow "检测到 fail2ban 正在运行，重新加载以恢复 jump 规则…"
         systemctl reload fail2ban 2>/dev/null || systemctl restart fail2ban 2>/dev/null || \
             yellow "fail2ban reload 失败，请手动执行 systemctl restart fail2ban"
     fi
+
     green "防火墙规则已配置完成"
 }
 # ── 安装流程 ──────────────────────────────────────
