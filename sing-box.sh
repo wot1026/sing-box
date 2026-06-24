@@ -830,7 +830,7 @@ change_config() {
             green "\nUUID 已修改为：${new_uuid}\n"
             ;;
 
-        2)
+       2)
             reading "\n请输入新的 Hysteria2 端口（回车随机生成）: " new_port
             if [ -z "$new_port" ]; then
                 new_port=$(pick_free_udp_port)
@@ -853,8 +853,24 @@ change_config() {
                 rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
             fi
             mv "$tmp_file" "$inbounds_file"
+            # 删旧端口规则
             remove_port "${old_port}/udp"
-            allow_port "${new_port}/udp"
+            # 摘下 DROP 兜底 → 追加新端口 → 重新压入 DROP
+            iptables  -D INPUT -j DROP  2>/dev/null || true
+            ip6tables -D INPUT -j DROP  2>/dev/null || true
+            iptables  -A INPUT -p udp --dport "$new_port" -j ACCEPT 2>/dev/null || true
+            ip6tables -A INPUT -p udp --dport "$new_port" -j ACCEPT 2>/dev/null || true
+            iptables  -A INPUT -j DROP  2>/dev/null || true
+            ip6tables -A INPUT -j DROP  2>/dev/null || true
+            # 持久化
+            mkdir -p /etc/iptables
+            local _t4 _t6
+            _t4=$(mktemp)
+            iptables-save  > "$_t4" 2>/dev/null && mv "$_t4" /etc/iptables/rules.v4 \
+                || { rm -f "$_t4"; yellow "保存 rules.v4 失败"; }
+            _t6=$(mktemp)
+            ip6tables-save > "$_t6" 2>/dev/null && mv "$_t6" /etc/iptables/rules.v6 \
+                || { rm -f "$_t6"; yellow "保存 rules.v6 失败"; }
             restart_singbox && get_info
             green "\nHysteria2 端口已修改为：${new_port}\n"
             ;;
