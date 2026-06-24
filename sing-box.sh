@@ -854,7 +854,9 @@ change_config() {
             fi
             mv "$tmp_file" "$inbounds_file"
             # 删旧端口规则（IPv4，精确删除避免误伤）
-            iptables -D INPUT -p udp --dport "$old_port" -j ACCEPT 2>/dev/null || true
+            if ! iptables -D INPUT -p udp --dport "$old_port" -j ACCEPT 2>/dev/null; then
+                yellow "警告：未能删除旧端口 ${old_port} 的防火墙规则，可能需要手动检查 iptables"
+            fi
 
             # 摘下 DROP 兜底 → 追加新端口 → 重新压入 DROP（只操作 IPv4，v6 全 DROP 不动）
             iptables -D INPUT -j DROP 2>/dev/null || true
