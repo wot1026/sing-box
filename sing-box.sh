@@ -461,6 +461,11 @@ EOF
         if [ -f "${backup_dir}/argo_token" ]; then
             cp "${backup_dir}/argo_token" "${work_dir}/argo_token"
             chmod 600 "${work_dir}/argo_token"
+            if [ -s "${work_dir}/argo_token" ]; then
+                ARGO_TOKEN_RESTORED=true
+            else
+                yellow "警告：argo_token 备份文件为空，恢复失败"
+            fi
         fi
         if [ -f "${backup_dir}/cf.env" ]; then
             cp "${backup_dir}/cf.env" "${work_dir}/cf.env"
@@ -1501,6 +1506,7 @@ do_install() {
     TUNNEL_FULLY_RESTORED=false
     BACKUP_SUCCESS=false
     TUNNEL_TOKEN_MODE=false
+    ARGO_TOKEN_RESTORED=false
 
     install_packages jq openssl curl || { red "基础依赖安装失败，请检查网络或软件源"; exit 1; }
 
@@ -1519,8 +1525,17 @@ do_install() {
     sleep 2
     create_shortcut
 
+    # 清理备份目录前，确认所有该恢复的敏感文件确实落盘，避免误删导致无法重新排查
+    local backup_has_token=false
+    [ -f "${backup_dir}/argo_token" ] && backup_has_token=true
+
     if [ -s "${conf_dir}/inbounds.json" ]; then
-        [ -d "$backup_dir" ] && rm -rf "$backup_dir"
+        if $backup_has_token && [ "${ARGO_TOKEN_RESTORED:-false}" != true ]; then
+            yellow "警告：备份中存在 Token 但未能成功恢复到 ${work_dir}，保留备份目录以便排查"
+            yellow "请检查 ${backup_dir}/argo_token 内容，确认无误后可手动删除该目录"
+        else
+            [ -d "$backup_dir" ] && rm -rf "$backup_dir"
+        fi
     else
         yellow "警告：inbounds.json 未落盘，保留备份目录以供重试"
     fi
