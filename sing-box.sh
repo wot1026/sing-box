@@ -1240,6 +1240,102 @@ update_script() {
 }
 
 # ── 主菜单 ────────────────────────────────────────
+# ── SSH 防护管理 ──────────────────────────────────
+manage_fail2ban() {
+    clear; echo ""
+    green "=== SSH 防护 (fail2ban) ===\n"
+
+    if ! command_exists fail2ban-client; then
+        yellow "fail2ban 未安装"
+        green  "1. 安装并启用 SSH 防护"
+        purple "0. 返回主菜单"
+        skyblue "————"
+        reading "\n请输入选择: " choice
+        case "$choice" in
+            1)
+                install_packages fail2ban || { red "安装失败"; return; }
+
+                local ssh_port
+                ssh_port=$(ss -tlnpH 2>/dev/null | awk '/sshd/{print $4}' | grep -oE '[0-9]+$' | head -1)
+                [ -z "$ssh_port" ] && ssh_port=$(grep -E '^Port ' /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+                [ -z "$ssh_port" ] && ssh_port=22
+
+                cat > /etc/fail2ban/jail.local << EOF
+[sshd]
+enabled  = true
+port     = ${ssh_port}
+backend  = systemd
+maxretry = 5
+bantime  = 3600
+findtime = 600
+EOF
+                systemctl enable fail2ban
+                systemctl restart fail2ban
+                if systemctl is-active fail2ban &>/dev/null; then
+                    green "\nfail2ban 已启用，正在保护 SSH 端口 ${ssh_port}\n"
+                else
+                    red "\nfail2ban 启动失败，请检查日志: journalctl -u fail2ban\n"
+                fi
+                ;;
+            0) return ;;
+            *) red "无效选项" ;;
+        esac
+        return
+    fi
+
+    local f2b_status
+    if systemctl is-active fail2ban &>/dev/null; then
+        f2b_status="running"
+    else
+        f2b_status="not running"
+    fi
+
+    local banned_count
+    banned_count=$(fail2ban-client status sshd 2>/dev/null \
+        | grep "Currently banned" | grep -oE '[0-9]+$')
+    [ -z "$banned_count" ] && banned_count=0
+
+    green "状态: ${f2b_status}    当前封禁数: ${banned_count}\n"
+    green  "1. 启动 fail2ban"
+    green  "2. 停止 fail2ban"
+    green  "3. 重启 fail2ban"
+    green  "4. 查看被封禁 IP 列表"
+    green  "5. 解封指定 IP"
+    red    "6. 卸载 fail2ban"
+    purple "0. 返回主菜单"
+    skyblue "————"
+    reading "\n请输入选择: " choice
+    case "$choice" in
+        1) systemctl start fail2ban   && green "已启动" ;;
+        2) systemctl stop fail2ban    && green "已停止" ;;
+        3) systemctl restart fail2ban && green "已重启" ;;
+        4)
+            echo ""
+            fail2ban-client status sshd 2>/dev/null || yellow "暂无数据"
+            ;;
+        5)
+            reading "请输入要解封的 IP: " unban_ip
+            [ -z "$unban_ip" ] && { red "IP 不能为空"; return; }
+            fail2ban-client set sshd unbanip "$unban_ip" \
+                && green "已解封 ${unban_ip}" \
+                || red "解封失败，请确认该 IP 是否在封禁列表中"
+            ;;
+        6)
+            reading "确定要卸载 fail2ban 吗? (y/n): " confirm
+            if [[ "$confirm" == [yY] ]]; then
+                systemctl stop fail2ban 2>/dev/null
+                systemctl disable fail2ban 2>/dev/null
+                apt-get remove -y fail2ban 2>/dev/null
+                green "fail2ban 已卸载"
+            else
+                purple "已取消"
+            fi
+            ;;
+        0) return ;;
+        *) red "无效选项" ;;
+    esac
+}
+
 menu() {
     local sb_status argo_status
     sb_status=$(check_singbox 2>&1)
@@ -1263,6 +1359,7 @@ menu() {
     green  "9. 更新脚本"
     echo   "==============="
     purple "10. SSH 综合工具箱"
+    purple "11. SSH 防护 (fail2ban)"
     echo   "==============="
     red    "0. 退出脚本"
     echo   "==========="
@@ -1610,7 +1707,7 @@ case "$1" in
     "")
         while true; do
             menu
-            reading "请输入选择(0-10): " choice
+            reading "请输入选择(0-11): " choice
             echo ""
             need_pause=true
             case "$choice" in
@@ -1635,8 +1732,9 @@ case "$1" in
                     bash <(curl -fsSL https://ssh_tool.eooce.com)
                     need_pause=false
                     ;;
+                11) manage_fail2ban; need_pause=true ;;
                 0) exit 0 ;;
-                *) red "无效选项，请输入 0-10" ;;
+                *) red "无效选项，请输入 0-11" ;;
             esac
             [ "$need_pause" = true ] && read -n1 -s -r -p $'\033[1;91m按任意键返回…\033[0m'
             echo ""
