@@ -1272,8 +1272,15 @@ setup_firewall_base() {
         apt-get install -y iptables 2>/dev/null || { red "iptables 安装失败，跳过防火墙配置"; return; }
     fi
     if command_exists ufw && ufw status | grep -q "Status: active"; then
-        yellow "检测到 UFW 已启用，跳过 iptables 直接管理"
-        return
+        yellow "检测到 UFW 已启用，正在卸载以统一交由 iptables 管理…"
+        ufw disable 2>/dev/null || true
+        apt-get remove -y ufw 2>/dev/null || true
+        # 清空 UFW 残留的链，避免冲突
+        iptables -F 2>/dev/null || true
+        iptables -X 2>/dev/null || true
+        iptables -t nat -F 2>/dev/null || true
+        iptables -t nat -X 2>/dev/null || true
+        green "UFW 已卸载，继续执行 iptables 防火墙配置"
     fi
     if [ "$(id -u)" -ne 0 ]; then
         yellow "警告：当前非 root，进程名将无法显示"
