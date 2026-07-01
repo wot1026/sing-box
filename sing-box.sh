@@ -891,6 +891,26 @@ change_config() {
             if ss -tlnH | awk '{print $5}' | grep -q ":${new_port}$"; then
                 red "端口 ${new_port} 已被占用，请换一个"; sleep 1; return
             fi
+
+            # Token 模式下，本地端口和 Cloudflare Dashboard 后端配置是分离的，
+            # sed 无法同步修改 Dashboard 侧配置，必须用户手动去 Dashboard 改，
+            # 因此这里在写入配置前先强制确认，避免节点静默失效
+            local is_token_mode=false
+            if [ -f "${work_dir}/tunnel.yml" ] && [ -f "${work_dir}/argo_token" ] && [ ! -f "${work_dir}/tunnel.json" ]; then
+                is_token_mode=true
+            fi
+
+            if $is_token_mode; then
+                yellow "\n⚠ 检测到 Token 模式固定隧道"
+                yellow "本地端口修改后，还需要手动前往 Cloudflare Dashboard"
+                yellow "将该隧道的后端端口（Public Hostname → Service）改为 ${new_port}"
+                yellow "在改完 Dashboard 配置之前，VLESS 节点会连接失败\n"
+                reading "是否已确认要继续修改本地端口？(y/n): " confirm_token
+                if [[ "$confirm_token" != [yY] ]]; then
+                    purple "已取消端口修改\n"; sleep 1; return
+                fi
+            fi
+
             local tmp_file
             tmp_file=$(mktemp)
             jq --argjson p "$new_port" \
@@ -900,9 +920,10 @@ change_config() {
                 rm -f "$tmp_file"; red "配置写入失败"; sleep 1; return
             fi
             mv "$tmp_file" "$inbounds_file"
+
             if [ -f "${work_dir}/tunnel.yml" ]; then
-                if [ -f "${work_dir}/argo_token" ] && [ ! -f "${work_dir}/tunnel.json" ]; then
-                    yellow "⚠ Token 模式：请同步在 Cloudflare Dashboard 中将后端端口改为 ${new_port}"
+                if $is_token_mode; then
+                    yellow "⚠ 请立即前往 Cloudflare Dashboard 将后端端口改为 ${new_port}，否则节点无法连接"
                 else
                     sed -i "s|service: http://localhost:[0-9]*|service: http://localhost:${new_port}|" \
                         "${work_dir}/tunnel.yml"
