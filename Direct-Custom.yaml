@@ -1,0 +1,12 @@
+# 规则名称: Direct-Custom
+# 说明: 个人自定义直连域名
+domain_set:
+  - s.mvconf.f.360.cn
+  - safebrowsing.urlsec.qq.com
+domain_suffix_set:
+  - dns.weixin.qq.com.cn
+  - m-team.io
+  - m-team.cc
+  - hath.network
+  - 555yy2.com
+  - jisuzyv.com
