@@ -4,7 +4,6 @@ domain_set:
   - s.mvconf.f.360.cn
   - safebrowsing.urlsec.qq.com
 domain_suffix_set:
-  - dns.weixin.qq.com.cn
   - m-team.io
   - m-team.cc
   - hath.network
