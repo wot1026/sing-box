@@ -1,23 +1,26 @@
+# NAME: Reject-Custom
 # 用途：补充 anti-AD、SukkaW 等规则集未覆盖到的隐私追踪/广告域名
 # 使用方式（Egern rules 里加一条）：
 # - rule_set:
 #     match: https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/Reject-Custom.yaml
 #     policy: REJECT-NO-DROP
 #     disabled: false
- 
+
 no_resolve: true
 domain_set:
   # Facebook/Meta 追踪像素 —— anti-AD / SukkaW 均未覆盖
   - connect.facebook.net
- 
+
+  # Facebook 另一服务域名 —— 与 connect.facebook.net 同类，非主站
+  - ep2.facebook.com
+
   # Zefr 广告数据/视频广告验证 —— anti-AD / SukkaW 均未覆盖
   - daq.zefrdata.com
   - vast.zefrdata.com
- 
+
   # DoubleVerify 广告验证/遥测（TikTok 等App使用）
   - tiktok.tps.dv.tech
- 
+
 domain_suffix_set:
   # DoubleVerify 主域名，覆盖其所有子域名
   - dv.tech
- 
