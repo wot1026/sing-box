@@ -14,3 +14,11 @@ domain_suffix_set:
   - manus.im
   - digicert.com
   - ntp.org
+  # Snap Kit SDK（第三方App集成Snapchat登录/分享/Bitmoji的官方接口）—— 确认功能性域名，非广告
+  - snapkit.com
+  # Stripchat 内容分发CDN（图片/视频流/WebSocket聊天）—— 确认为正常服务域名
+  - stripchat.com
+  - doppiocdn.net
+  - doppiocdn.com
+  # 通用前端资源CDN，非站点专属
+  - cdnjs.cloudflare.com
