@@ -1,0 +1,16 @@
+# 用途：已确认走代理没问题的正常服务域名，统一指向"全球策略"
+# 目的：把这些域名从兜底策略里挪出来，排查兜底日志时减少干扰
+# 使用方式（Egern rules 里加一批，放在 default 兜底规则之前）：
+# 需要给每个 domain 各写一条 rule，policy 均为 全球策略
+
+domain_suffix_set:
+  - paypalobjects.com
+  - intercom.io
+  - intercom.com
+  - revenuecat.com
+  - split.io
+  - braze.eu
+  - termius.com
+  - manus.im
+  - digicert.com
+  - ntp.org
