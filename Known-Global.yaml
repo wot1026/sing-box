@@ -23,3 +23,7 @@ domain_suffix_set:
   # 通用前端资源CDN，非站点专属
   - cdnjs.cloudflare.com
   - kelee.one
+  # 错误监控/APM/风控，多租户 SaaS
+  - sentry.io
+  - datadoghq.com
+  - siftscience.com
