@@ -27,12 +27,6 @@ domain_set:
   - shouji.sogou.com
   - ws-keyboard.shouji.sogou.com
 
-  # Stripchat 等站点广告/统计域名 —— anti-AD / SukkaW 均未覆盖
-  - mc.thedd.online
-  - loo3laej.com
-  - assets.chapturist.com
-  - assets.strpssts-ana.com
-
 domain_suffix_set:
   # DoubleVerify 主域名，覆盖其所有子域名
   - dv.tech
