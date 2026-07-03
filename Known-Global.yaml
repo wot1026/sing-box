@@ -22,3 +22,4 @@ domain_suffix_set:
   - doppiocdn.com
   # 通用前端资源CDN，非站点专属
   - cdnjs.cloudflare.com
+  - kelee.one
