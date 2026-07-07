@@ -21,12 +21,6 @@ domain_set:
   # DoubleVerify 广告验证/遥测（TikTok 等App使用）
   - tiktok.tps.dv.tech
 
-  # AWAvenue 独有覆盖 —— anti-AD / SukkaW 均未覆盖
-  - api.statsig.com
-  - c.evidon.com
-  - shouji.sogou.com
-  - ws-keyboard.shouji.sogou.com
-
 domain_suffix_set:
   # DoubleVerify 主域名，覆盖其所有子域名
   - dv.tech
