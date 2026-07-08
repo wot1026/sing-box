@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-08 11:18:35
+# 更新时间: 2026-07-08 11:45:21
 # 插件: BlockAdvertisers
 # 模式: filter
 
@@ -1084,9 +1084,3 @@ rules:
 - domain:
     match: ep7.facebook.com
     policy: REJECT
-mitm:
-  hostnames:
-    excludes:
-    - video-dsp.pddpic.com
-    - t-dsp.pinduoduo.com
-    - images.pinduoduo.com
