@@ -1,18 +1,18 @@
-{
-  "version": "v1",
-  "rules": [
-    {
-      "domain": [
-        "full:s.mvconf.f.360.cn",
-        "full:safebrowsing.urlsec.qq.com",
-        "domain:m-team.io",
-        "domain:m-team.cc",
-        "domain:hath.network",
-        "domain:wu5mv.com",
-        "domain:jisuzyv.com",
-        "domain:wise.com",
-        "domain:transferwise.com"
-      ]
-    }
-  ]
-}
+[
+  {
+    "outboundTag": "direct",
+    "domain": [
+      "domain:m-team.io",
+      "domain:m-team.cc",
+      "domain:hath.network",
+      "domain:wu5mv.com",
+      "domain:jisuzyv.com",
+      "domain:wise.com",
+      "domain:transferwise.com",
+      "full:s.mvconf.f.360.cn",
+      "full:safebrowsing.urlsec.qq.com"
+    ],
+    "enabled": true,
+    "remarks": "自定义直连(GitHub订阅)"
+  }
+]
