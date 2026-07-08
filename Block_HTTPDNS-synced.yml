@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-08 10:59:23
+# 更新时间: 2026-07-08 11:18:35
 # 插件: Block_HTTPDNS
 # 模式: exception
 
@@ -561,7 +561,8 @@ url_rewrites:
   status_code: 200
 mitm:
   hostnames:
-  - appconf.mail.163.com
-  - msglb.91160.com
-  - ucdc2-upaas.uc.cn
-  - gw-cn.jiaoliuqu.com
+    includes:
+    - appconf.mail.163.com
+    - msglb.91160.com
+    - ucdc2-upaas.uc.cn
+    - gw-cn.jiaoliuqu.com
