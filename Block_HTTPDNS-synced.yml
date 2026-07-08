@@ -1,13 +1,13 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-08 09:29:13
+# 更新时间: 2026-07-08 09:52:06
 # 插件: Block_HTTPDNS
 # 模式: exception
 
 name: HTTPDNS拦截器(自用-排除拼多多)
-description: |-
-  拦截常见的HTTPDNS服务，以确保这些请求都能够在Loon的DNS框架下工作。
+description: '拦截常见的HTTPDNS服务，以确保这些请求都能够在Loon的DNS框架下工作。
 
-  ⚠️ 基于可莉原版 Block_HTTPDNS 模块修改，前置了针对拼多多(titan.pinduoduo.com titanId特征)的放行例外规则，个人自用。
+
+  ⚠️ 基于可莉原版 Block_HTTPDNS 模块修改，前置了针对拼多多(titan.pinduoduo.com titanId特征)的放行例外规则，个人自用。'
 open_url: ''
 author: 可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md], VirgilClyne[https://github.com/VirgilClyne] (自用修改版，排除拼多多)
 homepage: https://hub.kelee.one
