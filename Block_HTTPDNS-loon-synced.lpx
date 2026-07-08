@@ -1,12 +1,12 @@
 #!# 自动同步自 kelee.one (https://kelee.one/Tool/Loon/Lpx/Block_HTTPDNS.lpx)
-#!# 更新时间: 2026-07-08 18:02:17
+#!# 更新时间: 2026-07-08 18:33:40
 #!# 已剔除拼多多相关规则/重写/MitM条目，格式保持Loon原生语法不变
 
-#!name=HTTPDNSÊã¶Êà™Âô®
-#!desc=Êã¶Êà™Â∏∏ËßÅÁöÑHTTPDNSÊúçÂä°Ôºå‰ª•Á°Æ‰øùËøô‰∫õËØ∑Ê±ÇÈÉΩËÉΩÂ§üÂú®LoonÁöÑDNSÊ°ÜÊû∂‰∏ãÂ∑•‰Ωú„ÄÇ
+#!name=HTTPDNS拦截器
+#!desc=拦截常见的HTTPDNS服务，以确保这些请求都能够在Loon的DNS框架下工作。
 #!openUrl=
-#!author=ÂèØËéâüÖ•[https://github.com/luestr/ProxyResource/blob/main/README.md], VirgilClyne[https://github.com/VirgilClyne]
-#!tag=ÂéªÂπøÂëä, ‰æùËµñ
+#!author=可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md], VirgilClyne[https://github.com/VirgilClyne]
+#!tag=去广告, 依赖
 #!system=
 #!system_version=
 #!loon_version=3.4.0(962)
