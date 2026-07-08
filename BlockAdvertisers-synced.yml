@@ -1,350 +1,1086 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-08 08:12:28
+# 更新时间: 2026-07-08 08:23:43
 # 已去除拼多多相关规则
 
-payload:
-  - 'DOMAIN-KEYWORD,adstrategy,REJECT'
-  - 'AND,((DOMAIN-KEYWORD,tnc),(OR,((DOMAIN-SUFFIX,capcutapi.com),(DOMAIN-SUFFIX,zijieapi.com),(DOMAIN-SUFFIX,isnssdk.com),(DOMAIN-SUFFIX,toutiaoapi.com),(DOMAIN-SUFFIX,bytedance.com),(DOMAIN-SUFFIX,snssdk.com),(DOMAIN-SUFFIX,sgsnssdk.com)))),DIRECT'
-  - 'AND,((DOMAIN-KEYWORD,-ad-),(DOMAIN-SUFFIX,byteimg.com)),REJECT'
-  - 'AND,((DOMAIN-KEYWORD,ads),(DOMAIN-KEYWORD,-normal.zijieapi.com)),REJECT'
-  - 'DOMAIN,lf-ad-ies.bytecdn.cn,REJECT'
-  - 'DOMAIN,dig.bdurl.net,REJECT'
-  - 'DOMAIN,extlog.snssdk.com,REJECT'
-  - 'DOMAIN,mcs.snssdk.com,REJECT'
-  - 'DOMAIN-SUFFIX,bds.snssdk.com,REJECT'
-  - 'DOMAIN-SUFFIX,byteadverts.com,REJECT'
-  - 'DOMAIN-SUFFIX,ctobsnssdk.com,REJECT'
-  - 'DOMAIN-SUFFIX,pangle.io,REJECT'
-  - 'DOMAIN-KEYWORD,pangolin,REJECT'
-  - 'DOMAIN-KEYWORD,pglstatp,REJECT'
-  - 'DOMAIN-KEYWORD,panplayable-toutiao,REJECT'
-  - 'DOMAIN-KEYWORD,-ad-sign.byteimg.com,REJECT'
-  - 'DOMAIN-KEYWORD,-ad.byteoversea.com,REJECT'
-  - 'DOMAIN-KEYWORD,asiad.byteactivity,REJECT'
-  - 'DOMAIN-KEYWORD,iflyad.bj.openstorage.cn,REJECT'
-  - 'DOMAIN-KEYWORD,bjimp.voiceads.cn,REJECT'
-  - 'DOMAIN-SUFFIX,1rtb.net,REJECT'
-  - 'DOMAIN-SUFFIX,1rtb.com,REJECT'
-  - 'DOMAIN-SUFFIX,yfanads.com,REJECT'
-  - 'DOMAIN-SUFFIX,halomobi.com,REJECT'
-  - 'DOMAIN-SUFFIX,hubcloud.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,inmobi.cn,REJECT'
-  - 'DOMAIN-SUFFIX,uyunad.com,REJECT'
-  - 'DOMAIN-SUFFIX,puata.info,REJECT'
-  - 'DOMAIN,gdfp.gifshow.com,REJECT'
-  - 'DOMAIN,open.e.kuaishou.com,REJECT'
-  - 'DOMAIN,open.e.kuaishou.cn,REJECT'
-  - 'DOMAIN,adtrack.e.kuaishou.com,REJECT'
-  - 'DOMAIN-SUFFIX,partner.gifshow.com,REJECT'
-  - 'DOMAIN-SUFFIX,adukwai.com,REJECT'
-  - 'DOMAIN-SUFFIX,adkwai.com,REJECT'
-  - 'DOMAIN-SUFFIX,supersonicads.com,REJECT'
-  - 'DOMAIN-SUFFIX,appsad.cn,REJECT'
-  - 'DOMAIN-SUFFIX,beizi.biz,REJECT'
-  - 'DOMAIN-SUFFIX,ad-scope.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adn-plus.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,beizi.biz,REJECT'
-  - 'DOMAIN-SUFFIX,adhub.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adnplus.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adscope.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adscope.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adscope.xyz,REJECT'
-  - 'DOMAIN-SUFFIX,beizi.info,REJECT'
-  - 'DOMAIN-SUFFIX,beizi.online,REJECT'
-  - 'DOMAIN-SUFFIX,miaozhen.com,REJECT'
-  - 'DOMAIN-SUFFIX,admobile.top,REJECT'
-  - 'DOMAIN-SUFFIX,tianmu.mobi,REJECT'
-  - 'DOMAIN-SUFFIX,admobile.mobi,REJECT'
-  - 'DOMAIN-SUFFIX,admobile.net.cn,REJECT'
-  - 'DOMAIN-SUFFIX,popadshop.com,REJECT'
-  - 'DOMAIN-SUFFIX,admobile.vip,REJECT'
-  - 'DOMAIN-SUFFIX,yksdks.com,REJECT'
-  - 'DOMAIN-SUFFIX,dutils.com,REJECT'
-  - 'DOMAIN,init.sms.mob.com,DIRECT'
-  - 'DOMAIN,sdkapi.sms.mob.com,DIRECT'
-  - 'DOMAIN,code.sms.mob.com,DIRECT'
-  - 'DOMAIN-SUFFIX,mob.com,REJECT'
-  - 'DOMAIN,smartop-sdkapi.jiguang.cn,DIRECT'
-  - 'DOMAIN,sdk.verification.jiguang.cn,DIRECT'
-  - 'DOMAIN-SUFFIX,jiguang.cn,REJECT'
-  - 'DOMAIN-SUFFIX,jpush.cn,REJECT'
-  - 'DOMAIN-SUFFIX,jpush.io,REJECT'
-  - 'DOMAIN,afd.baidu.com,REJECT'
-  - 'DOMAIN,als.baidu.com,REJECT'
-  - 'DOMAIN,bgg.baidu.com,REJECT'
-  - 'DOMAIN,cpro.baidustatic.com,REJECT'
-  - 'DOMAIN,feed-image.baidu.com,REJECT'
-  - 'DOMAIN,click-bes.baidu.com,REJECT'
-  - 'DOMAIN,eclick.baidu.com,REJECT'
-  - 'DOMAIN,mobads-logs.baidu.com,REJECT'
-  - 'DOMAIN,mobads-pre-config.cdn.bcebos.com,REJECT'
-  - 'DOMAIN,mobads.baidu.com,REJECT'
-  - 'DOMAIN,nadvideo2.baidu.com,REJECT'
-  - 'DOMAIN,wn.pos.baidu.com,REJECT'
-  - 'DOMAIN,miniapp-ad.cdn.bcebos.com,REJECT'
-  - 'DOMAIN,mobads-pre-config.cdn.bcebos.com,REJECT'
-  - 'DOMAIN,hm.baidu.com,REJECT'
-  - 'DOMAIN,api.map.baidu.com,REJECT'
-  - 'DOMAIN,dlswbr.baidu.com,REJECT'
-  - 'DOMAIN,miao.baidu.com,REJECT'
-  - 'DOMAIN-SUFFIX,union.baidu.cn,REJECT'
-  - 'DOMAIN-SUFFIX,union.baidu.com,REJECT'
-  - 'DOMAIN,tdid.m.qq.com,REJECT'
-  - 'DOMAIN,adsmind.gdtimg.com,REJECT'
-  - 'DOMAIN,adsmind.ugdtimg.com,REJECT'
-  - 'DOMAIN,ads.privacy.qq.com,REJECT'
-  - 'DOMAIN,huatuocode.huatuo.qq.com,REJECT'
-  - 'DOMAIN,info4.video.qq.com,REJECT'
-  - 'DOMAIN,info6.video.qq.com,REJECT'
-  - 'DOMAIN,ios.bugly.qq.com,REJECT'
-  - 'DOMAIN,pro.bugly.qq.com,REJECT'
-  - 'DOMAIN,ios.video.mpush.qq.com,REJECT'
-  - 'DOMAIN,otheve.beacon.qq.com,REJECT'
-  - 'DOMAIN,pgdt.gtimg.cn,REJECT'
-  - 'DOMAIN,pgdt.ugdtimg.com,REJECT'
-  - 'DOMAIN,qzs.gdtimg.com,REJECT'
-  - 'DOMAIN,qzs.qq.com,REJECT'
-  - 'DOMAIN,rmonitor.qq.com,REJECT'
-  - 'DOMAIN,sdkconfig.video.qq.com,REJECT'
-  - 'DOMAIN,tmead.y.qq.com,REJECT'
-  - 'DOMAIN,tmeadbak.y.qq.com,REJECT'
-  - 'DOMAIN,tmeadcomm.y.qq.com,REJECT'
-  - 'DOMAIN,tpns.qq.com,REJECT'
-  - 'DOMAIN,wup.imtt.qq.com,REJECT'
-  - 'DOMAIN,tpstelemetry.tencent.com,REJECT'
-  - 'DOMAIN,otheve.beacon.qq.com,REJECT'
-  - 'DOMAIN,stat.y.qq.com,REJECT'
-  - 'DOMAIN,stat6.y.qq.com,REJECT'
-  - 'DOMAIN,oth.str.mdt.qq.com,REJECT'
-  - 'DOMAIN,h.trace.qq.com,REJECT'
-  - 'DOMAIN,sdk.e.qq.com,REJECT'
-  - 'DOMAIN,tangram.e.qq.com,REJECT'
-  - 'DOMAIN-KEYWORD,trace.qq.com,REJECT'
-  - 'DOMAIN-KEYWORD,trace.video.qq.com,REJECT'
-  - 'DOMAIN-KEYWORD,ad.hunyuan.tencent.com,REJECT'
-  - 'DOMAIN-SUFFIX,gdt.qq.com,REJECT'
-  - 'DOMAIN-SUFFIX,l.qq.com,REJECT'
-  - 'DOMAIN-SUFFIX,imtmp.net,REJECT'
-  - 'DOMAIN-SUFFIX,ugdtimg.com,REJECT'
-  - 'IP-CIDR,47.110.187.87/32,REJECT,no-resolve'
-  - 'DOMAIN-SUFFIX,opadlink.com,REJECT'
-  - 'DOMAIN-SUFFIX,staevent.work,REJECT'
-  - 'DOMAIN-SUFFIX,openinstall.online,REJECT'
-  - 'DOMAIN-SUFFIX,statchannel.store,REJECT'
-  - 'DOMAIN-SUFFIX,oplinking.com,REJECT'
-  - 'DOMAIN-SUFFIX,deepinstall.com,REJECT'
-  - 'DOMAIN-SUFFIX,openinstall.com,REJECT'
-  - 'DOMAIN-SUFFIX,installtongji.top,REJECT'
-  - 'DOMAIN-SUFFIX,openlink.cc,REJECT'
-  - 'DOMAIN-SUFFIX,opstatistics.com,REJECT'
-  - 'DOMAIN-SUFFIX,installtongji.online,REJECT'
-  - 'DOMAIN-SUFFIX,statschannel.xyz,REJECT'
-  - 'DOMAIN-SUFFIX,staevent.xyz,REJECT'
-  - 'DOMAIN-SUFFIX,opstatistics.cn,REJECT'
-  - 'DOMAIN-SUFFIX,openinstall.top,REJECT'
-  - 'DOMAIN-SUFFIX,openinstall.io,REJECT'
-  - 'DOMAIN-SUFFIX,statsinstall.xyz,REJECT'
-  - 'DOMAIN-SUFFIX,statchannel.top,REJECT'
-  - 'DOMAIN-SUFFIX,getui.com,REJECT'
-  - 'DOMAIN-SUFFIX,getui.net,REJECT'
-  - 'DOMAIN-SUFFIX,igexin.com,REJECT'
-  - 'DOMAIN-SUFFIX,umtrack.com,REJECT'
-  - 'DOMAIN-SUFFIX,umeng.com,REJECT'
-  - 'DOMAIN-SUFFIX,umsns.com,REJECT'
-  - 'DOMAIN-SUFFIX,lydass.net,REJECT'
-  - 'DOMAIN-SUFFIX,lydass.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,lydaas.net,REJECT'
-  - 'DOMAIN-SUFFIX,lydass.cn,REJECT'
-  - 'DOMAIN-SUFFIX,lydaas.cn,REJECT'
-  - 'DOMAIN-SUFFIX,lydaas.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,fwosapp.com,REJECT'
-  - 'DOMAIN-SUFFIX,rhinokeen.com,REJECT'
-  - 'DOMAIN-SUFFIX,lydaas.com,REJECT'
-  - 'DOMAIN-SUFFIX,xixikf.com,REJECT'
-  - 'DOMAIN-SUFFIX,wrating.com,REJECT'
-  - 'DOMAIN-SUFFIX,puata.info,REJECT'
-  - 'DOMAIN-SUFFIX,mobmore.com,REJECT'
-  - 'DOMAIN-SUFFIX,um0.cn,REJECT'
-  - 'DOMAIN-SUFFIX,umv0.com,REJECT'
-  - 'DOMAIN-SUFFIX,umtrack1.com,REJECT'
-  - 'DOMAIN-SUFFIX,eshiqi.com,REJECT'
-  - 'DOMAIN-SUFFIX,umv5.com,REJECT'
-  - 'DOMAIN-SUFFIX,dratio.com,REJECT'
-  - 'DOMAIN-SUFFIX,umtrack0.com,REJECT'
-  - 'DOMAIN-SUFFIX,uyunad.com,REJECT'
-  - 'DOMAIN-SUFFIX,whalecloud.com,REJECT'
-  - 'DOMAIN-SUFFIX,umtrack2.com,REJECT'
-  - 'DOMAIN-SUFFIX,umengcloud.com,REJECT'
-  - 'DOMAIN-SUFFIX,umeng.com,REJECT'
-  - 'DOMAIN-SUFFIX,umtrack.com,REJECT'
-  - 'DOMAIN-SUFFIX,um1.cn,REJECT'
-  - 'DOMAIN-SUFFIX,umsns.com,REJECT'
-  - 'DOMAIN-SUFFIX,adfunlink.com,REJECT'
-  - 'DOMAIN-SUFFIX,tianmu.mobi,REJECT'
-  - 'DOMAIN-SUFFIX,ubixioe.com,REJECT'
-  - 'DOMAIN,ossgw.alicdn.com,REJECT'
-  - 'DOMAIN,ems.youku.com,REJECT'
-  - 'DOMAIN,hudong.alicdn.com,REJECT'
-  - 'DOMAIN,et.tanx.com,REJECT'
-  - 'DOMAIN,df.tanx.com,REJECT'
-  - 'DOMAIN,opehs.tanx.com,REJECT'
-  - 'DOMAIN,beacon-api.aliyuncs.com,REJECT'
-  - 'DOMAIN,adash.man.aliyuncs.com,REJECT'
-  - 'DOMAIN,applog.uc.cn,REJECT'
-  - 'DOMAIN,atoken.m.taobao.com,REJECT'
-  - 'AND,((DOMAIN-KEYWORD,adash),(DOMAIN-SUFFIX,ut.taobao.com)),REJECT'
-  - 'URL-REGEX,"^http:\/\/.+\/amdc\/mobileDispatch",REJECT'
-  - 'DOMAIN,baichuan-sdk.alicdn.com,REJECT'
-  - 'DOMAIN,acs4baichuan.m.taobao.com,REJECT'
-  - 'nbsdk-baichuan.alicdn.com'
-  - 'acs4baichuan.m.taobao.com'
-  - 'DOMAIN,api.sm.cn,REJECT'
-  - 'DOMAIN,c.sm.cn,REJECT'
-  - 'DOMAIN,content-understand-strategy.sm.cn,REJECT'
-  - 'DOMAIN,hc-ssp.sm.cn,REJECT'
-  - 'DOMAIN,sdk-log.partner.sm.cn,REJECT'
-  - 'DOMAIN,partner.uc.cn,REJECT'
-  - 'DOMAIN,cpc-service-square.aiclk.com,REJECT'
-  - 'DOMAIN,logrcv.aiclk.com,REJECT'
-  - 'DOMAIN,acjs.aliyun.com,REJECT'
-  - 'DOMAIN,retcode.alicdn.com,REJECT'
-  - 'DOMAIN,arms-retcode.aliyuncs.com,REJECT'
-  - 'DOMAIN-SUFFIX,iytcdn.com,REJECT'
-  - 'DOMAIN,huichuan.sm.cn,REJECT'
-  - 'DOMAIN,huichuan-mc.sm.cn,REJECT'
-  - 'DOMAIN,api.sm.cn,REJECT'
-  - 'DOMAIN,nex.163.com,REJECT'
-  - 'DOMAIN,iad.g.163.com,REJECT'
-  - 'DOMAIN,gorgon.youdao.com,REJECT'
-  - 'DOMAIN-SUFFIX,ad.xiaomi.com,REJECT'
-  - 'DOMAIN,al-log.d.meituan.net,REJECT'
-  - 'DOMAIN,babel-statistics-android.d.meituan.net,REJECT'
-  - 'DOMAIN,maplocatesdksnapshot.d.meituan.net,REJECT'
-  - 'DOMAIN,metrics-picture.d.meituan.net,REJECT'
-  - 'DOMAIN,route-stats.d.meituan.net,REJECT'
-  - 'DOMAIN,dsp-x.jd.com,REJECT'
-  - 'DOMAIN,im-x.jd.com,REJECT'
-  - 'DOMAIN,xlog.jd.com,REJECT'
-  - 'DOMAIN,janapi.jd.com,REJECT'
-  - 'DOMAIN-SUFFIX,toponadss.com,REJECT'
-  - 'DOMAIN-SUFFIX,toponad.com,REJECT'
-  - 'DOMAIN-SUFFIX,motowoo.com,REJECT'
-  - 'DOMAIN,guide2.bianxianmao.com,REJECT'
-  - 'DOMAIN,sdk.zhangyuyidong.cn,REJECT'
-  - 'DOMAIN,sdklog.zhangyuyidong.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adintl.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adtaipo.com,REJECT'
-  - 'DOMAIN-SUFFIX,adx.yixin.im,REJECT'
-  - 'DOMAIN-SUFFIX,kuaiyiad.com,REJECT'
-  - 'DOMAIN-SUFFIX,adtianmai.com,REJECT'
-  - 'DOMAIN-SUFFIX,readgps.com,REJECT'
-  - 'DOMAIN-SUFFIX,fanglinad.com,REJECT'
-  - 'DOMAIN-SUFFIX,17admob.com,REJECT'
-  - 'DOMAIN-SUFFIX,slyxmobi.com,REJECT'
-  - 'DOMAIN-SUFFIX,mobrtb.com,REJECT'
-  - 'DOMAIN-SUFFIX,maplehaze.cn,REJECT'
-  - 'DOMAIN-SUFFIX,lnk0.com,REJECT'
-  - 'DOMAIN-SUFFIX,bridgeoos.com,REJECT'
-  - 'DOMAIN-SUFFIX,anythinktech.com,REJECT'
-  - 'DOMAIN-SUFFIX,birdgesdk.com,REJECT'
-  - 'DOMAIN-SUFFIX,toponadss.com,REJECT'
-  - 'DOMAIN-SUFFIX,bridgeoos.com,REJECT'
-  - 'DOMAIN-SUFFIX,anyrtb.com,REJECT'
-  - 'DOMAIN-SUFFIX,anythinktech.com,REJECT'
-  - 'DOMAIN-SUFFIX,combocn.com,REJECT'
-  - 'DOMAIN-SUFFIX,beanxin.com,REJECT'
-  - 'DOMAIN-SUFFIX,letway.cn,REJECT'
-  - 'DOMAIN-SUFFIX,newitai.com,REJECT'
-  - 'DOMAIN-SUFFIX,fireluck.cn,REJECT'
-  - 'DOMAIN-SUFFIX,setway.cn,REJECT'
-  - 'DOMAIN-SUFFIX,artcto.com,REJECT'
-  - 'DOMAIN-SUFFIX,wayio.cn,REJECT'
-  - 'DOMAIN-SUFFIX,iaddata.com,REJECT'
-  - 'DOMAIN,ad-evods.tianya.tv,REJECT'
-  - 'DOMAIN-SUFFIX,tuia.cn,REJECT'
-  - 'DOMAIN-SUFFIX,66mobi.com,REJECT'
-  - 'DOMAIN-SUFFIX,xdplt.com,REJECT'
-  - 'DOMAIN,ads.cup.com.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adjust.com,REJECT'
-  - 'DOMAIN-SUFFIX,adjust.net.in,REJECT'
-  - 'DOMAIN,app-analytics-services.com,REJECT'
-  - 'DOMAIN,odm.app-ads-services.com,REJECT'
-  - 'DOMAIN,firebaselogging-pa.googleapis.com,REJECT'
-  - 'DOMAIN,firebaseinappmessaging.googleapis.com,REJECT'
-  - 'DOMAIN,fundingchoicesmessages.google.com,REJECT'
-  - 'DOMAIN-SUFFIX,doubleclick.net,REJECT'
-  - 'DOMAIN-SUFFIX,doubleclick-cn.net,REJECT'
-  - 'DOMAIN-SUFFIX,googlesyndication.com,REJECT'
-  - 'DOMAIN-SUFFIX,googlesyndication-cn.com,REJECT'
-  - 'DOMAIN-SUFFIX,xinduoad.com,REJECT'
-  - 'DOMAIN-SUFFIX,kuaiyiad.com,REJECT'
-  - 'DOMAIN,statis.miwuad.com,REJECT'
-  - 'DOMAIN-SUFFIX,sigmob.cn,REJECT'
-  - 'DOMAIN-SUFFIX,richmob.cn,REJECT'
-  - 'DOMAIN-SUFFIX,66mobi.com,REJECT'
-  - 'DOMAIN,ad.shunchangzhixing.com,REJECT'
-  - 'DOMAIN,redirect.shunchangzhixing.com,REJECT'
-  - 'DOMAIN,api.touch-moblie.com,REJECT'
-  - 'DOMAIN-SUFFIX,api.touch-moblie.com,REJECT'
-  - 'DOMAIN,mercury-gateway.ixiaochuan.cn,REJECT'
-  - 'DOMAIN,adapi.izuiyou.com,REJECT'
-  - 'DOMAIN-SUFFIX,domob.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adwangmai.com,REJECT'
-  - 'DOMAIN-SUFFIX,bxsnews.com,REJECT'
-  - 'DOMAIN-SUFFIX,ranfenghd.com,REJECT'
-  - 'DOMAIN-SUFFIX,miaozhen.com,REJECT'
-  - 'DOMAIN-SUFFIX,qchannel01.cn,REJECT'
-  - 'DOMAIN-SUFFIX,ad.xelements.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adsrvr.cn,REJECT'
-  - 'DOMAIN-SUFFIX,adsrvr.org,REJECT'
-  - 'DOMAIN-SUFFIX,fancydsp.com,REJECT'
-  - 'DOMAIN-SUFFIX,xcultur.com,REJECT'
-  - 'DOMAIN-SUFFIX,bayescom.com,REJECT'
-  - 'DOMAIN-SUFFIX,etoolads.cn,REJECT'
-  - 'DOMAIN,ad.aggrxinc.com,REJECT'
-  - 'DOMAIN-SUFFIX,mentamob.com,REJECT'
-  - 'DOMAIN-SUFFIX,advlion.com,REJECT'
-  - 'DOMAIN-SUFFIX,shanghailingye.cn,REJECT'
-  - 'DOMAIN-SUFFIX,shenshiads.com,REJECT'
-  - 'DOMAIN-SUFFIX,adshenshi.com,REJECT'
-  - 'DOMAIN-SUFFIX,qidianad.com,REJECT'
-  - 'DOMAIN-SUFFIX,kuaichuanad.com,REJECT'
-  - 'DOMAIN-SUFFIX,statisticslinks.com,REJECT'
-  - 'DOMAIN,adx.zuoyebang.com,REJECT'
-  - 'DOMAIN-SUFFIX,cxwlad.com,REJECT'
-  - 'DOMAIN-SUFFIX,ad.gameley.com,REJECT'
-  - 'DOMAIN-SUFFIX,yiweiads.com,REJECT'
-  - 'DOMAIN-SUFFIX,adx.52qumao.com,REJECT'
-  - 'DOMAIN-SUFFIX,hzjizhun.cn,REJECT'
-  - 'DOMAIN-SUFFIX,hzjizhun.com,REJECT'
-  - 'DOMAIN-SUFFIX,sogaha.cn,REJECT'
-  - 'DOMAIN,zxid-m.mobileservice.cn,REJECT'
-  - 'DOMAIN-SUFFIX,tradplusad.com,REJECT'
-  - 'DOMAIN-SUFFIX,fancyapi.com,REJECT'
-  - 'DOMAIN-SUFFIX,medproad.com,REJECT'
-  - 'DOMAIN-SUFFIX,applovin.com,REJECT'
-  - 'DOMAIN-SUFFIX,iads.unity3d.com,REJECT'
-  - 'DOMAIN-SUFFIX,unityads.unity3d.com,REJECT'
-  - 'DOMAIN-SUFFIX,unityads.unitychina.cn,REJECT'
-  - 'DOMAIN-SUFFIX,tapjoy.com,REJECT'
-  - 'DOMAIN-SUFFIX,vungle.com,REJECT'
-  - 'DOMAIN-SUFFIX,adsmoloco.com,REJECT'
-  - 'DOMAIN-SUFFIX,smadex.com,REJECT'
-  - 'DOMAIN-SUFFIX,tapad.com,REJECT'
-  - 'DOMAIN-SUFFIX,adsappier.com,REJECT'
-  - 'DOMAIN-SUFFIX,inmobi.com,REJECT'
-  - 'DOMAIN-SUFFIX,inmobicdn.net,REJECT'
-  - 'DOMAIN-SUFFIX,appsflyersdk.com,REJECT'
-  - 'DOMAIN-SUFFIX,applvn.com,REJECT'
-  - 'DOMAIN-SUFFIX,moloco.com,REJECT'
-  - 'DOMAIN-SUFFIX,rayjump.com,REJECT'
-  - 'DOMAIN-SUFFIX,rixengine.com,REJECT'
-  - 'DOMAIN-SUFFIX,amazon-adsystem.com,REJECT'
-  - 'DOMAIN-SUFFIX,skarb.club,REJECT'
-  - 'DOMAIN-SUFFIX,skarb.work,REJECT'
-  - 'DOMAIN-SUFFIX,amplitude.com,REJECT'
-  - 'DOMAIN-SUFFIX,fivecdm.com,REJECT'
-  - 'DOMAIN-SUFFIX,doubleverify.com,REJECT'
-  - 'DOMAIN-SUFFIX,tobidad.cn,REJECT'
-  - 'DOMAIN-SUFFIX,tobidad.com,REJECT'
-  - 'DOMAIN,ep7.facebook.com,REJECT'
+name: 广告平台拦截器(自用-排除拼多多)
+description: |-
+  此插件是所有去广告插件的基础，只针对广告平台处理。你依然需要安装其他去广告插件来搭配使用，并确保此插件始终排序在顶部。
+
+  支持拦截腾讯、字节跳动、快手、百度、邑盟、倍孜、艾狄墨搏、袤博、极光、个推、友盟、阿里巴巴、阿里妈妈、阿里百川、超级汇川、优比客思、秒针、网易、美团、小米、京东、天目、讯飞、泛连、锐讯灵通、聚次方、美数、嗨量、维快网络、变现猫、章鱼、分秒、泰之菩、翼信、快易、数萤技术、方麟、益起、上量优选、新义互联、腾云天下、布里奇、塔酷、丽声、推啊、旺脉、新度博望、新多广告、快易科技、封狐信息、互裕科技、旺脉信息、佳量动力、享点科技、游昆信息、小川科技、旺脉科技、萃弈、泛为、米漫、易量跃动、秒针、贵士移动、星讯、倍业科技、创聚科技、硬核聚视、数因科技、芒拓网络、上海领页、神蓍科技、酷盈、凡提科技、亿帆、作业帮、畅行未来、华夏乐游、邑维、趣小猫、极准网络、元气智广、Google、SupersonicAds、APPSAD、Adjust、Sigmob、TradPlus、Fancy、MedPro、AppLovin、Unity3D、Tapjoy、Liftoff、Vungle、Moloco、Smadex、Tapad、Appier、InMobi、AppsFlyer、AppLovin、Moloco、RayJump、RixEngine、Amazon、Skarb、Amplitude、ToBid、UMS等广告平台的广告请求，更适合iOS平台的应用。
+
+  ⚠️ 自用修改版：已移除拼多多(pinduoduo.com/pddpic.com)相关 Rewrite 和 MitM 规则，由脚本自动同步维护。
+open_url: ''
+author: 可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md] (自用修改版，排除拼多多)
+homepage: https://hub.kelee.one
+icon: https://raw.githubusercontent.com/luestr/IconResource/main/Website_icon/120px/TencentAd.png
+tag:
+- 去广告
+- 依赖
+dns: {}
+rules:
+- domain_keyword:
+    match: adstrategy
+  policy: REJECT
+- and:
+    match:
+    - domain_keyword:
+        match: tnc
+    - or:
+        match:
+        - domain_suffix:
+            match: capcutapi.com
+        - domain_suffix:
+            match: zijieapi.com
+        - domain_suffix:
+            match: isnssdk.com
+        - domain_suffix:
+            match: toutiaoapi.com
+        - domain_suffix:
+            match: bytedance.com
+        - domain_suffix:
+            match: snssdk.com
+        - domain_suffix:
+            match: sgsnssdk.com
+    policy: DIRECT
+- and:
+    match:
+    - domain_keyword:
+        match: -ad-
+    - domain_suffix:
+        match: byteimg.com
+    policy: REJECT
+- and:
+    match:
+    - domain_keyword:
+        match: ads
+    - domain_keyword:
+        match: -normal.zijieapi.com
+    policy: REJECT
+- domain:
+    match: lf-ad-ies.bytecdn.cn
+  policy: REJECT
+- domain:
+    match: dig.bdurl.net
+  policy: REJECT
+- domain:
+    match: extlog.snssdk.com
+  policy: REJECT
+- domain:
+    match: mcs.snssdk.com
+  policy: REJECT
+- domain_suffix:
+    match: bds.snssdk.com
+  policy: REJECT
+- domain_suffix:
+    match: byteadverts.com
+  policy: REJECT
+- domain_suffix:
+    match: ctobsnssdk.com
+  policy: REJECT
+- domain_suffix:
+    match: pangle.io
+  policy: REJECT
+- domain_keyword:
+    match: pangolin
+  policy: REJECT
+- domain_keyword:
+    match: pglstatp
+  policy: REJECT
+- domain_keyword:
+    match: panplayable-toutiao
+  policy: REJECT
+- domain_keyword:
+    match: -ad-sign.byteimg.com
+  policy: REJECT
+- domain_keyword:
+    match: -ad.byteoversea.com
+  policy: REJECT
+- domain_keyword:
+    match: asiad.byteactivity
+  policy: REJECT
+- domain_keyword:
+    match: iflyad.bj.openstorage.cn
+  policy: REJECT
+- domain_keyword:
+    match: bjimp.voiceads.cn
+  policy: REJECT
+- domain_suffix:
+    match: 1rtb.net
+  policy: REJECT
+- domain_suffix:
+    match: 1rtb.com
+  policy: REJECT
+- domain_suffix:
+    match: yfanads.com
+  policy: REJECT
+- domain_suffix:
+    match: halomobi.com
+  policy: REJECT
+- domain_suffix:
+    match: hubcloud.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: inmobi.cn
+  policy: REJECT
+- domain_suffix:
+    match: uyunad.com
+  policy: REJECT
+- domain_suffix:
+    match: puata.info
+  policy: REJECT
+- domain:
+    match: gdfp.gifshow.com
+  policy: REJECT
+- domain:
+    match: open.e.kuaishou.com
+  policy: REJECT
+- domain:
+    match: open.e.kuaishou.cn
+  policy: REJECT
+- domain:
+    match: adtrack.e.kuaishou.com
+  policy: REJECT
+- domain_suffix:
+    match: partner.gifshow.com
+  policy: REJECT
+- domain_suffix:
+    match: adukwai.com
+  policy: REJECT
+- domain_suffix:
+    match: adkwai.com
+  policy: REJECT
+- domain_suffix:
+    match: supersonicads.com
+  policy: REJECT
+- domain_suffix:
+    match: appsad.cn
+  policy: REJECT
+- domain_suffix:
+    match: beizi.biz
+  policy: REJECT
+- domain_suffix:
+    match: ad-scope.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: adn-plus.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: beizi.biz
+  policy: REJECT
+- domain_suffix:
+    match: adhub.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: adnplus.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: adscope.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: adscope.cn
+  policy: REJECT
+- domain_suffix:
+    match: adscope.xyz
+  policy: REJECT
+- domain_suffix:
+    match: beizi.info
+  policy: REJECT
+- domain_suffix:
+    match: beizi.online
+  policy: REJECT
+- domain_suffix:
+    match: miaozhen.com
+  policy: REJECT
+- domain_suffix:
+    match: admobile.top
+  policy: REJECT
+- domain_suffix:
+    match: tianmu.mobi
+  policy: REJECT
+- domain_suffix:
+    match: admobile.mobi
+  policy: REJECT
+- domain_suffix:
+    match: admobile.net.cn
+  policy: REJECT
+- domain_suffix:
+    match: popadshop.com
+  policy: REJECT
+- domain_suffix:
+    match: admobile.vip
+  policy: REJECT
+- domain_suffix:
+    match: yksdks.com
+  policy: REJECT
+- domain_suffix:
+    match: dutils.com
+  policy: REJECT
+- domain:
+    match: init.sms.mob.com
+  policy: DIRECT
+- domain:
+    match: sdkapi.sms.mob.com
+  policy: DIRECT
+- domain:
+    match: code.sms.mob.com
+  policy: DIRECT
+- domain_suffix:
+    match: mob.com
+  policy: REJECT
+- domain:
+    match: smartop-sdkapi.jiguang.cn
+  policy: DIRECT
+- domain:
+    match: sdk.verification.jiguang.cn
+  policy: DIRECT
+- domain_suffix:
+    match: jiguang.cn
+  policy: REJECT
+- domain_suffix:
+    match: jpush.cn
+  policy: REJECT
+- domain_suffix:
+    match: jpush.io
+  policy: REJECT
+- domain:
+    match: afd.baidu.com
+  policy: REJECT
+- domain:
+    match: als.baidu.com
+  policy: REJECT
+- domain:
+    match: bgg.baidu.com
+  policy: REJECT
+- domain:
+    match: cpro.baidustatic.com
+  policy: REJECT
+- domain:
+    match: feed-image.baidu.com
+  policy: REJECT
+- domain:
+    match: click-bes.baidu.com
+  policy: REJECT
+- domain:
+    match: eclick.baidu.com
+  policy: REJECT
+- domain:
+    match: mobads-logs.baidu.com
+  policy: REJECT
+- domain:
+    match: mobads-pre-config.cdn.bcebos.com
+  policy: REJECT
+- domain:
+    match: mobads.baidu.com
+  policy: REJECT
+- domain:
+    match: nadvideo2.baidu.com
+  policy: REJECT
+- domain:
+    match: wn.pos.baidu.com
+  policy: REJECT
+- domain:
+    match: miniapp-ad.cdn.bcebos.com
+  policy: REJECT
+- domain:
+    match: mobads-pre-config.cdn.bcebos.com
+  policy: REJECT
+- domain:
+    match: hm.baidu.com
+  policy: REJECT
+- domain:
+    match: api.map.baidu.com
+  policy: REJECT
+- domain:
+    match: dlswbr.baidu.com
+  policy: REJECT
+- domain:
+    match: miao.baidu.com
+  policy: REJECT
+- domain_suffix:
+    match: union.baidu.cn
+  policy: REJECT
+- domain_suffix:
+    match: union.baidu.com
+  policy: REJECT
+- domain:
+    match: tdid.m.qq.com
+  policy: REJECT
+- domain:
+    match: adsmind.gdtimg.com
+  policy: REJECT
+- domain:
+    match: adsmind.ugdtimg.com
+  policy: REJECT
+- domain:
+    match: ads.privacy.qq.com
+  policy: REJECT
+- domain:
+    match: huatuocode.huatuo.qq.com
+  policy: REJECT
+- domain:
+    match: info4.video.qq.com
+  policy: REJECT
+- domain:
+    match: info6.video.qq.com
+  policy: REJECT
+- domain:
+    match: ios.bugly.qq.com
+  policy: REJECT
+- domain:
+    match: pro.bugly.qq.com
+  policy: REJECT
+- domain:
+    match: ios.video.mpush.qq.com
+  policy: REJECT
+- domain:
+    match: otheve.beacon.qq.com
+  policy: REJECT
+- domain:
+    match: pgdt.gtimg.cn
+  policy: REJECT
+- domain:
+    match: pgdt.ugdtimg.com
+  policy: REJECT
+- domain:
+    match: qzs.gdtimg.com
+  policy: REJECT
+- domain:
+    match: qzs.qq.com
+  policy: REJECT
+- domain:
+    match: rmonitor.qq.com
+  policy: REJECT
+- domain:
+    match: sdkconfig.video.qq.com
+  policy: REJECT
+- domain:
+    match: tmead.y.qq.com
+  policy: REJECT
+- domain:
+    match: tmeadbak.y.qq.com
+  policy: REJECT
+- domain:
+    match: tmeadcomm.y.qq.com
+  policy: REJECT
+- domain:
+    match: tpns.qq.com
+  policy: REJECT
+- domain:
+    match: wup.imtt.qq.com
+  policy: REJECT
+- domain:
+    match: tpstelemetry.tencent.com
+  policy: REJECT
+- domain:
+    match: otheve.beacon.qq.com
+  policy: REJECT
+- domain:
+    match: stat.y.qq.com
+  policy: REJECT
+- domain:
+    match: stat6.y.qq.com
+  policy: REJECT
+- domain:
+    match: oth.str.mdt.qq.com
+  policy: REJECT
+- domain:
+    match: h.trace.qq.com
+  policy: REJECT
+- domain:
+    match: sdk.e.qq.com
+  policy: REJECT
+- domain:
+    match: tangram.e.qq.com
+  policy: REJECT
+- domain_keyword:
+    match: trace.qq.com
+  policy: REJECT
+- domain_keyword:
+    match: trace.video.qq.com
+  policy: REJECT
+- domain_keyword:
+    match: ad.hunyuan.tencent.com
+  policy: REJECT
+- domain_suffix:
+    match: gdt.qq.com
+  policy: REJECT
+- domain_suffix:
+    match: l.qq.com
+  policy: REJECT
+- domain_suffix:
+    match: imtmp.net
+  policy: REJECT
+- domain_suffix:
+    match: ugdtimg.com
+  policy: REJECT
+- ip_cidr:
+    match: 47.110.187.87/32
+    no_resolve: true
+  policy: REJECT
+- domain_suffix:
+    match: opadlink.com
+  policy: REJECT
+- domain_suffix:
+    match: staevent.work
+  policy: REJECT
+- domain_suffix:
+    match: openinstall.online
+  policy: REJECT
+- domain_suffix:
+    match: statchannel.store
+  policy: REJECT
+- domain_suffix:
+    match: oplinking.com
+  policy: REJECT
+- domain_suffix:
+    match: deepinstall.com
+  policy: REJECT
+- domain_suffix:
+    match: openinstall.com
+  policy: REJECT
+- domain_suffix:
+    match: installtongji.top
+  policy: REJECT
+- domain_suffix:
+    match: openlink.cc
+  policy: REJECT
+- domain_suffix:
+    match: opstatistics.com
+  policy: REJECT
+- domain_suffix:
+    match: installtongji.online
+  policy: REJECT
+- domain_suffix:
+    match: statschannel.xyz
+  policy: REJECT
+- domain_suffix:
+    match: staevent.xyz
+  policy: REJECT
+- domain_suffix:
+    match: opstatistics.cn
+  policy: REJECT
+- domain_suffix:
+    match: openinstall.top
+  policy: REJECT
+- domain_suffix:
+    match: openinstall.io
+  policy: REJECT
+- domain_suffix:
+    match: statsinstall.xyz
+  policy: REJECT
+- domain_suffix:
+    match: statchannel.top
+  policy: REJECT
+- domain_suffix:
+    match: getui.com
+  policy: REJECT
+- domain_suffix:
+    match: getui.net
+  policy: REJECT
+- domain_suffix:
+    match: igexin.com
+  policy: REJECT
+- domain_suffix:
+    match: umtrack.com
+  policy: REJECT
+- domain_suffix:
+    match: umeng.com
+  policy: REJECT
+- domain_suffix:
+    match: umsns.com
+  policy: REJECT
+- domain_suffix:
+    match: lydass.net
+  policy: REJECT
+- domain_suffix:
+    match: lydass.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: lydaas.net
+  policy: REJECT
+- domain_suffix:
+    match: lydass.cn
+  policy: REJECT
+- domain_suffix:
+    match: lydaas.cn
+  policy: REJECT
+- domain_suffix:
+    match: lydaas.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: fwosapp.com
+  policy: REJECT
+- domain_suffix:
+    match: rhinokeen.com
+  policy: REJECT
+- domain_suffix:
+    match: lydaas.com
+  policy: REJECT
+- domain_suffix:
+    match: xixikf.com
+  policy: REJECT
+- domain_suffix:
+    match: wrating.com
+  policy: REJECT
+- domain_suffix:
+    match: puata.info
+  policy: REJECT
+- domain_suffix:
+    match: mobmore.com
+  policy: REJECT
+- domain_suffix:
+    match: um0.cn
+  policy: REJECT
+- domain_suffix:
+    match: umv0.com
+  policy: REJECT
+- domain_suffix:
+    match: umtrack1.com
+  policy: REJECT
+- domain_suffix:
+    match: eshiqi.com
+  policy: REJECT
+- domain_suffix:
+    match: umv5.com
+  policy: REJECT
+- domain_suffix:
+    match: dratio.com
+  policy: REJECT
+- domain_suffix:
+    match: umtrack0.com
+  policy: REJECT
+- domain_suffix:
+    match: uyunad.com
+  policy: REJECT
+- domain_suffix:
+    match: whalecloud.com
+  policy: REJECT
+- domain_suffix:
+    match: umtrack2.com
+  policy: REJECT
+- domain_suffix:
+    match: umengcloud.com
+  policy: REJECT
+- domain_suffix:
+    match: umeng.com
+  policy: REJECT
+- domain_suffix:
+    match: umtrack.com
+  policy: REJECT
+- domain_suffix:
+    match: um1.cn
+  policy: REJECT
+- domain_suffix:
+    match: umsns.com
+  policy: REJECT
+- domain_suffix:
+    match: adfunlink.com
+  policy: REJECT
+- domain_suffix:
+    match: tianmu.mobi
+  policy: REJECT
+- domain_suffix:
+    match: ubixioe.com
+  policy: REJECT
+- domain:
+    match: ossgw.alicdn.com
+  policy: REJECT
+- domain:
+    match: ems.youku.com
+  policy: REJECT
+- domain:
+    match: hudong.alicdn.com
+  policy: REJECT
+- domain:
+    match: et.tanx.com
+  policy: REJECT
+- domain:
+    match: df.tanx.com
+  policy: REJECT
+- domain:
+    match: opehs.tanx.com
+  policy: REJECT
+- domain:
+    match: beacon-api.aliyuncs.com
+  policy: REJECT
+- domain:
+    match: adash.man.aliyuncs.com
+  policy: REJECT
+- domain:
+    match: applog.uc.cn
+  policy: REJECT
+- domain:
+    match: atoken.m.taobao.com
+  policy: REJECT
+- and:
+    match:
+    - domain_keyword:
+        match: adash
+    - domain_suffix:
+        match: ut.taobao.com
+    policy: REJECT
+- url_regex:
+    match: ^http://.+/amdc/mobileDispatch
+  policy: REJECT
+- domain:
+    match: baichuan-sdk.alicdn.com
+  policy: REJECT
+- domain:
+    match: acs4baichuan.m.taobao.com
+  policy: REJECT
+- domain:
+    match: nbsdk-baichuan.alicdn.com
+  policy: REJECT
+- domain:
+    match: acs4baichuan.m.taobao.com
+  policy: REJECT
+- domain:
+    match: api.sm.cn
+  policy: REJECT
+- domain:
+    match: c.sm.cn
+  policy: REJECT
+- domain:
+    match: content-understand-strategy.sm.cn
+  policy: REJECT
+- domain:
+    match: hc-ssp.sm.cn
+  policy: REJECT
+- domain:
+    match: sdk-log.partner.sm.cn
+  policy: REJECT
+- domain:
+    match: partner.uc.cn
+  policy: REJECT
+- domain:
+    match: cpc-service-square.aiclk.com
+  policy: REJECT
+- domain:
+    match: logrcv.aiclk.com
+  policy: REJECT
+- domain:
+    match: acjs.aliyun.com
+  policy: REJECT
+- domain:
+    match: retcode.alicdn.com
+  policy: REJECT
+- domain:
+    match: arms-retcode.aliyuncs.com
+  policy: REJECT
+- domain_suffix:
+    match: iytcdn.com
+  policy: REJECT
+- domain:
+    match: huichuan.sm.cn
+  policy: REJECT
+- domain:
+    match: huichuan-mc.sm.cn
+  policy: REJECT
+- domain:
+    match: api.sm.cn
+  policy: REJECT
+- domain:
+    match: nex.163.com
+  policy: REJECT
+- domain:
+    match: iad.g.163.com
+  policy: REJECT
+- domain:
+    match: gorgon.youdao.com
+  policy: REJECT
+- domain_suffix:
+    match: ad.xiaomi.com
+  policy: REJECT
+- domain:
+    match: al-log.d.meituan.net
+  policy: REJECT
+- domain:
+    match: babel-statistics-android.d.meituan.net
+  policy: REJECT
+- domain:
+    match: maplocatesdksnapshot.d.meituan.net
+  policy: REJECT
+- domain:
+    match: metrics-picture.d.meituan.net
+  policy: REJECT
+- domain:
+    match: route-stats.d.meituan.net
+  policy: REJECT
+- domain:
+    match: dsp-x.jd.com
+  policy: REJECT
+- domain:
+    match: im-x.jd.com
+  policy: REJECT
+- domain:
+    match: xlog.jd.com
+  policy: REJECT
+- domain:
+    match: janapi.jd.com
+  policy: REJECT
+- domain_suffix:
+    match: toponadss.com
+  policy: REJECT
+- domain_suffix:
+    match: toponad.com
+  policy: REJECT
+- domain_suffix:
+    match: motowoo.com
+  policy: REJECT
+- domain:
+    match: guide2.bianxianmao.com
+  policy: REJECT
+- domain:
+    match: sdk.zhangyuyidong.cn
+  policy: REJECT
+- domain:
+    match: sdklog.zhangyuyidong.cn
+  policy: REJECT
+- domain_suffix:
+    match: adintl.cn
+  policy: REJECT
+- domain_suffix:
+    match: adtaipo.com
+  policy: REJECT
+- domain_suffix:
+    match: adx.yixin.im
+  policy: REJECT
+- domain_suffix:
+    match: kuaiyiad.com
+  policy: REJECT
+- domain_suffix:
+    match: adtianmai.com
+  policy: REJECT
+- domain_suffix:
+    match: readgps.com
+  policy: REJECT
+- domain_suffix:
+    match: fanglinad.com
+  policy: REJECT
+- domain_suffix:
+    match: 17admob.com
+  policy: REJECT
+- domain_suffix:
+    match: slyxmobi.com
+  policy: REJECT
+- domain_suffix:
+    match: mobrtb.com
+  policy: REJECT
+- domain_suffix:
+    match: maplehaze.cn
+  policy: REJECT
+- domain_suffix:
+    match: lnk0.com
+  policy: REJECT
+- domain_suffix:
+    match: bridgeoos.com
+  policy: REJECT
+- domain_suffix:
+    match: anythinktech.com
+  policy: REJECT
+- domain_suffix:
+    match: birdgesdk.com
+  policy: REJECT
+- domain_suffix:
+    match: toponadss.com
+  policy: REJECT
+- domain_suffix:
+    match: bridgeoos.com
+  policy: REJECT
+- domain_suffix:
+    match: anyrtb.com
+  policy: REJECT
+- domain_suffix:
+    match: anythinktech.com
+  policy: REJECT
+- domain_suffix:
+    match: combocn.com
+  policy: REJECT
+- domain_suffix:
+    match: beanxin.com
+  policy: REJECT
+- domain_suffix:
+    match: letway.cn
+  policy: REJECT
+- domain_suffix:
+    match: newitai.com
+  policy: REJECT
+- domain_suffix:
+    match: fireluck.cn
+  policy: REJECT
+- domain_suffix:
+    match: setway.cn
+  policy: REJECT
+- domain_suffix:
+    match: artcto.com
+  policy: REJECT
+- domain_suffix:
+    match: wayio.cn
+  policy: REJECT
+- domain_suffix:
+    match: iaddata.com
+  policy: REJECT
+- domain:
+    match: ad-evods.tianya.tv
+  policy: REJECT
+- domain_suffix:
+    match: tuia.cn
+  policy: REJECT
+- domain_suffix:
+    match: 66mobi.com
+  policy: REJECT
+- domain_suffix:
+    match: xdplt.com
+  policy: REJECT
+- domain:
+    match: ads.cup.com.cn
+  policy: REJECT
+- domain_suffix:
+    match: adjust.com
+  policy: REJECT
+- domain_suffix:
+    match: adjust.net.in
+  policy: REJECT
+- domain:
+    match: app-analytics-services.com
+  policy: REJECT
+- domain:
+    match: odm.app-ads-services.com
+  policy: REJECT
+- domain:
+    match: firebaselogging-pa.googleapis.com
+  policy: REJECT
+- domain:
+    match: firebaseinappmessaging.googleapis.com
+  policy: REJECT
+- domain:
+    match: fundingchoicesmessages.google.com
+  policy: REJECT
+- domain_suffix:
+    match: doubleclick.net
+  policy: REJECT
+- domain_suffix:
+    match: doubleclick-cn.net
+  policy: REJECT
+- domain_suffix:
+    match: googlesyndication.com
+  policy: REJECT
+- domain_suffix:
+    match: googlesyndication-cn.com
+  policy: REJECT
+- domain_suffix:
+    match: xinduoad.com
+  policy: REJECT
+- domain_suffix:
+    match: kuaiyiad.com
+  policy: REJECT
+- domain:
+    match: statis.miwuad.com
+  policy: REJECT
+- domain_suffix:
+    match: sigmob.cn
+  policy: REJECT
+- domain_suffix:
+    match: richmob.cn
+  policy: REJECT
+- domain_suffix:
+    match: 66mobi.com
+  policy: REJECT
+- domain:
+    match: ad.shunchangzhixing.com
+  policy: REJECT
+- domain:
+    match: redirect.shunchangzhixing.com
+  policy: REJECT
+- domain:
+    match: api.touch-moblie.com
+  policy: REJECT
+- domain_suffix:
+    match: api.touch-moblie.com
+  policy: REJECT
+- domain:
+    match: mercury-gateway.ixiaochuan.cn
+  policy: REJECT
+- domain:
+    match: adapi.izuiyou.com
+  policy: REJECT
+- domain_suffix:
+    match: domob.cn
+  policy: REJECT
+- domain_suffix:
+    match: adwangmai.com
+  policy: REJECT
+- domain_suffix:
+    match: bxsnews.com
+  policy: REJECT
+- domain_suffix:
+    match: ranfenghd.com
+  policy: REJECT
+- domain_suffix:
+    match: miaozhen.com
+  policy: REJECT
+- domain_suffix:
+    match: qchannel01.cn
+  policy: REJECT
+- domain_suffix:
+    match: ad.xelements.cn
+  policy: REJECT
+- domain_suffix:
+    match: adsrvr.cn
+  policy: REJECT
+- domain_suffix:
+    match: adsrvr.org
+  policy: REJECT
+- domain_suffix:
+    match: fancydsp.com
+  policy: REJECT
+- domain_suffix:
+    match: xcultur.com
+  policy: REJECT
+- domain_suffix:
+    match: bayescom.com
+  policy: REJECT
+- domain_suffix:
+    match: etoolads.cn
+  policy: REJECT
+- domain:
+    match: ad.aggrxinc.com
+  policy: REJECT
+- domain_suffix:
+    match: mentamob.com
+  policy: REJECT
+- domain_suffix:
+    match: advlion.com
+  policy: REJECT
+- domain_suffix:
+    match: shanghailingye.cn
+  policy: REJECT
+- domain_suffix:
+    match: shenshiads.com
+  policy: REJECT
+- domain_suffix:
+    match: adshenshi.com
+  policy: REJECT
+- domain_suffix:
+    match: qidianad.com
+  policy: REJECT
+- domain_suffix:
+    match: kuaichuanad.com
+  policy: REJECT
+- domain_suffix:
+    match: statisticslinks.com
+  policy: REJECT
+- domain:
+    match: adx.zuoyebang.com
+  policy: REJECT
+- domain_suffix:
+    match: cxwlad.com
+  policy: REJECT
+- domain_suffix:
+    match: ad.gameley.com
+  policy: REJECT
+- domain_suffix:
+    match: yiweiads.com
+  policy: REJECT
+- domain_suffix:
+    match: adx.52qumao.com
+  policy: REJECT
+- domain_suffix:
+    match: hzjizhun.cn
+  policy: REJECT
+- domain_suffix:
+    match: hzjizhun.com
+  policy: REJECT
+- domain_suffix:
+    match: sogaha.cn
+  policy: REJECT
+- domain:
+    match: zxid-m.mobileservice.cn
+  policy: REJECT
+- domain_suffix:
+    match: tradplusad.com
+  policy: REJECT
+- domain_suffix:
+    match: fancyapi.com
+  policy: REJECT
+- domain_suffix:
+    match: medproad.com
+  policy: REJECT
+- domain_suffix:
+    match: applovin.com
+  policy: REJECT
+- domain_suffix:
+    match: iads.unity3d.com
+  policy: REJECT
+- domain_suffix:
+    match: unityads.unity3d.com
+  policy: REJECT
+- domain_suffix:
+    match: unityads.unitychina.cn
+  policy: REJECT
+- domain_suffix:
+    match: tapjoy.com
+  policy: REJECT
+- domain_suffix:
+    match: vungle.com
+  policy: REJECT
+- domain_suffix:
+    match: adsmoloco.com
+  policy: REJECT
+- domain_suffix:
+    match: smadex.com
+  policy: REJECT
+- domain_suffix:
+    match: tapad.com
+  policy: REJECT
+- domain_suffix:
+    match: adsappier.com
+  policy: REJECT
+- domain_suffix:
+    match: inmobi.com
+  policy: REJECT
+- domain_suffix:
+    match: inmobicdn.net
+  policy: REJECT
+- domain_suffix:
+    match: appsflyersdk.com
+  policy: REJECT
+- domain_suffix:
+    match: applvn.com
+  policy: REJECT
+- domain_suffix:
+    match: moloco.com
+  policy: REJECT
+- domain_suffix:
+    match: rayjump.com
+  policy: REJECT
+- domain_suffix:
+    match: rixengine.com
+  policy: REJECT
+- domain_suffix:
+    match: amazon-adsystem.com
+  policy: REJECT
+- domain_suffix:
+    match: skarb.club
+  policy: REJECT
+- domain_suffix:
+    match: skarb.work
+  policy: REJECT
+- domain_suffix:
+    match: amplitude.com
+  policy: REJECT
+- domain_suffix:
+    match: fivecdm.com
+  policy: REJECT
+- domain_suffix:
+    match: doubleverify.com
+  policy: REJECT
+- domain_suffix:
+    match: tobidad.cn
+  policy: REJECT
+- domain_suffix:
+    match: tobidad.com
+  policy: REJECT
+- domain:
+    match: ep7.facebook.com
+  policy: REJECT
