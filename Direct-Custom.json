@@ -1,0 +1,18 @@
+{
+  "version": "v1",
+  "rules": [
+    {
+      "domain": [
+        "full:s.mvconf.f.360.cn",
+        "full:safebrowsing.urlsec.qq.com",
+        "domain:m-team.io",
+        "domain:m-team.cc",
+        "domain:hath.network",
+        "domain:wu5mv.com",
+        "domain:jisuzyv.com",
+        "domain:wise.com",
+        "domain:transferwise.com"
+      ]
+    }
+  ]
+}
