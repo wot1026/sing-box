@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-08 11:45:22
+# 更新时间: 2026-07-08 17:48:41
 # 插件: Block_HTTPDNS
 # 模式: exception
 
@@ -12,9 +12,7 @@ open_url: ''
 author: 可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md], VirgilClyne[https://github.com/VirgilClyne] (自用修改版，排除拼多多)
 homepage: https://hub.kelee.one
 icon: https://raw.githubusercontent.com/luestr/IconResource/main/Other_icon/120px/HTTPDNS.png
-tag:
-- 去广告
-- 依赖
+dns: {}
 rules:
 - domain:
     match: titan.pinduoduo.com

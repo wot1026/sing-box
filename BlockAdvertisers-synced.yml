@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-08 11:45:21
+# 更新时间: 2026-07-08 17:48:41
 # 插件: BlockAdvertisers
 # 模式: filter
 
@@ -14,9 +14,7 @@ open_url: ''
 author: 可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md] (自用修改版，排除拼多多)
 homepage: https://hub.kelee.one
 icon: https://raw.githubusercontent.com/luestr/IconResource/main/Website_icon/120px/TencentAd.png
-tag:
-- 去广告
-- 依赖
+dns: {}
 rules:
 - domain_keyword:
     match: adstrategy
