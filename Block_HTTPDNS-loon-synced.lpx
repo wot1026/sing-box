@@ -1,5 +1,5 @@
 #!# 自动同步自 kelee.one (https://kelee.one/Tool/Loon/Lpx/Block_HTTPDNS.lpx)
-#!# 更新时间: 2026-07-08 19:47:27
+#!# 更新时间: 2026-07-09 04:00:04
 #!# 已前置插入拼多多HTTPDNS放行例外规则，格式保持Loon原生语法不变
 
 #!name=HTTPDNS拦截器
