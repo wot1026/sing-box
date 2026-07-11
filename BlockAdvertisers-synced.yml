@@ -59,7 +59,7 @@ rules:
     policy: REJECT
 - domain:
     match: dig.bdurl.net
-    policy: REJECT-NO-DROP
+    policy: REJECT-DROP
 - domain:
     match: extlog.snssdk.com
     policy: REJECT
