@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-10 03:00:03
+# 更新时间: 2026-07-11 03:00:03
 # 插件: BlockAdvertisers
 # 模式: filter
 
@@ -483,7 +483,7 @@ rules:
     policy: REJECT
 - domain_suffix:
     match: umeng.com
-    policy: REJECT-DROP
+    policy: REJECT
 - domain_suffix:
     match: umsns.com
     policy: REJECT
@@ -616,6 +616,9 @@ rules:
         match: adash
     - domain_suffix:
         match: ut.taobao.com
+    policy: REJECT
+- url_regex:
+    match: ^http://.+/amdc/mobileDispatch
     policy: REJECT
 - domain:
     match: baichuan-sdk.alicdn.com
