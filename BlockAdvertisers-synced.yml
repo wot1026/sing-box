@@ -59,7 +59,7 @@ rules:
     policy: REJECT
 - domain:
     match: dig.bdurl.net
-    policy: REJECT
+    policy: REJECT-NO-DROP
 - domain:
     match: extlog.snssdk.com
     policy: REJECT
@@ -616,9 +616,6 @@ rules:
         match: adash
     - domain_suffix:
         match: ut.taobao.com
-    policy: REJECT
-- url_regex:
-    match: ^http://.+/amdc/mobileDispatch
     policy: REJECT
 - domain:
     match: baichuan-sdk.alicdn.com
