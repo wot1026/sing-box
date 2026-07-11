@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-11 07:11:09
+# 更新时间: 2026-07-11 07:47:36
 # 插件: Block_HTTPDNS
 # 模式: exception
 
@@ -7,7 +7,7 @@ name: HTTPDNS拦截器(自用-排除拼多多)
 description: |-
   拦截常见的HTTPDNS服务，以确保这些请求都能够在Loon的DNS框架下工作。
 
-  ⚠️ 基于可莉原版 Block_HTTPDNS 模块修改，前置了针对拼多多(titan.pinduoduo.com titanId特征)的放行例外规则，并移除了微信HTTPDNS拦截规则（dns.weixin.qq.com 等），个人自用。
+  ⚠️ 基于可莉原版 Block_HTTPDNS 模块修改，前置了针对拼多多(titan.pinduoduo.com titanId特征)和微信(dns.weixin.qq.com 等HTTPDNS域名)的放行例外规则，个人自用。注：微信放行采用域名层前置例外而非删除IP拦截规则，上游IP段更新不影响本方案有效性。
 open_url: ''
 author: 可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md], VirgilClyne[https://github.com/VirgilClyne] (自用修改版，排除拼多多)
 homepage: https://hub.kelee.one
@@ -19,6 +19,15 @@ rules:
     policy: DIRECT
 - user_agent:
     match: '*com.xunmeng.pinduoduo*'
+    policy: DIRECT
+- domain:
+    match: dns.weixin.qq.com
+    policy: DIRECT
+- domain:
+    match: dns.weixin.qq.com.cn
+    policy: DIRECT
+- domain:
+    match: aedns.weixin.qq.com
     policy: DIRECT
 - domain_keyword:
     match: httpdns
@@ -81,6 +90,15 @@ rules:
     policy: REJECT
 - url_regex:
     match: ^http://xmc\.ximalaya\.com/xmlymain-login-web/login/
+    policy: REJECT
+- domain:
+    match: dns.weixin.qq.com
+    policy: REJECT
+- domain:
+    match: dns.weixin.qq.com.cn
+    policy: REJECT
+- domain:
+    match: aedns.weixin.qq.com
     policy: REJECT
 - ip_cidr:
     match: 39.156.140.30/32
