@@ -1,6 +1,6 @@
 #!# 自动同步自 kelee.one (https://kelee.one/Tool/Loon/Lpx/Block_HTTPDNS.lpx)
-#!# 更新时间: 2026-07-11 08:39:36
-#!# 已前置插入拼多多/微信HTTPDNS放行例外规则(不删除上游原始规则)，已剔除拼多多/amdc等指定规则，格式保持Loon原生语法不变
+#!# 更新时间: 2026-07-11 20:06:32
+#!# 已前置插入拼多多/微信/字节系HTTPDNS放行例外规则，并删除对应原始REJECT域名行(配套IP-CIDR规则保留)，已剔除拼多多/amdc等指定规则，格式保持Loon原生语法不变
 
 #!name=HTTPDNS拦截器(自用-排除拼多多)
 #!desc=拦截常见的HTTPDNS服务，以确保这些请求都能够在Loon的DNS框架下工作。
@@ -32,9 +32,6 @@ URL-REGEX, "^http:\/\/103\.44\.58\.64\/md\?", REJECT
 URL-REGEX, "^http:\/\/cdn\.wup\.huya\.com\/launch\/queryHttpDns", REJECT
 DOMAIN, dns2.q2cdn.com, REJECT
 URL-REGEX, "^http:\/\/xmc\.ximalaya\.com\/xmlymain-login-web\/login\/", REJECT
-DOMAIN, dns.weixin.qq.com, REJECT
-DOMAIN, dns.weixin.qq.com.cn, REJECT
-DOMAIN, aedns.weixin.qq.com, REJECT
 IP-CIDR, 39.156.140.30/32, REJECT, no-resolve
 IP-CIDR, 39.156.140.47/32, REJECT, no-resolve
 IP-CIDR, 39.156.140.245/32, REJECT, no-resolve

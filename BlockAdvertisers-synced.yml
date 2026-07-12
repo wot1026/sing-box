@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-11 08:39:36
+# 更新时间: 2026-07-11 20:06:32
 # 插件: BlockAdvertisers
 # 模式: filter
 
@@ -59,9 +59,6 @@ rules:
     policy: REJECT
 - domain:
     match: lf-ad-ies.bytecdn.cn
-    policy: REJECT
-- domain:
-    match: dig.bdurl.net
     policy: REJECT
 - domain:
     match: extlog.snssdk.com
@@ -628,9 +625,6 @@ rules:
     policy: REJECT
 - domain:
     match: nbsdk-baichuan.alicdn.com
-    policy: REJECT
-- domain:
-    match: acs4baichuan.m.taobao.com
     policy: REJECT
 - domain:
     match: api.sm.cn
