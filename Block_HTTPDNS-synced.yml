@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-07-14 03:00:04
+# 更新时间: 2026-07-14 05:42:51
 # 插件: Block_HTTPDNS
 # 模式: exception
 
@@ -7,7 +7,7 @@ name: HTTPDNS拦截器(自用-排除拼多多)
 description: |-
   拦截常见的HTTPDNS服务，以确保这些请求都能够在Loon的DNS框架下工作。
 
-  ⚠️ 基于可莉原版 Block_HTTPDNS 模块修改，前置了针对拼多多(titan.pinduoduo.com titanId特征)和微信(dns.weixin.qq.com 等HTTPDNS域名)的放行例外规则，并删除了后面重复的原始REJECT域名行，个人自用。注：配套的IP-CIDR拦截规则予以保留，因HTTP请求已在域名层被前置放行，IP层规则实际不会再被匹配到，无需、也无法精确识别哪些IP专属于微信而单独删除。
+  ⚠️ 基于可莉原版 Block_HTTPDNS 模块修改，前置了针对拼多多(titan.pinduoduo.com titanId特征)、微信(dns.weixin.qq.com 等HTTPDNS域名)以及B站/yirujs(httpdns.bilivideo.com精确域名 + host=参数匹配 bilivideo/bilibili/yirujs域名)的放行例外规则，并删除了后面重复的原始REJECT域名行，个人自用。注：配套的IP-CIDR拦截规则予以保留，因HTTP请求已在域名层被前置放行，IP层规则实际不会再被匹配到，无需、也无法精确识别哪些IP专属于这些服务而单独删除。
 open_url: ''
 author: 可莉🅥[https://github.com/luestr/ProxyResource/blob/main/README.md], VirgilClyne[https://github.com/VirgilClyne] (自用修改版，排除拼多多)
 homepage: https://hub.kelee.one
@@ -29,11 +29,11 @@ rules:
 - domain:
     match: aedns.weixin.qq.com
     policy: DIRECT
-- url_regex:
-    match: 'host=[^&]*\.(bilivideo|bilibili|yirujs)\.com'
-    policy: DIRECT
 - domain:
     match: httpdns.bilivideo.com
+    policy: DIRECT
+- url_regex:
+    match: host=[^&]*\.(bilivideo|bilibili|yirujs)\.com
     policy: DIRECT
 - domain_keyword:
     match: httpdns
@@ -271,9 +271,6 @@ rules:
     no_resolve: true
 - domain:
     match: httpdns.kg.qq.com
-    policy: REJECT
-- domain:
-    match: httpdns.bilivideo.com
     policy: REJECT
 - domain:
     match: httpdns.browser.miui.com
