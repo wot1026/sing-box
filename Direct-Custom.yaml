@@ -3,4 +3,9 @@
 domain_suffix_set:
   - wise.com
   - transferwise.com
- 
+  - mask.icloud.com
+  - mask-h2.icloud.com
+  - mask-api.icloud.com
+  - apple-relay.cloudflare.com
+domain_keyword_set:
+  - apple-relay
