@@ -3,3 +3,8 @@
 
 DOMAIN-SUFFIX,wise.com
 DOMAIN-SUFFIX,transferwise.com
+DOMAIN-SUFFIX,mask.icloud.com
+DOMAIN-SUFFIX,mask-h2.icloud.com
+DOMAIN-SUFFIX,mask-api.icloud.com
+DOMAIN-SUFFIX,apple-relay.cloudflare.com
+DOMAIN-KEYWORD,apple-relay
