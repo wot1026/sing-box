@@ -29,6 +29,12 @@ rules:
 - domain:
     match: aedns.weixin.qq.com
     policy: DIRECT
+- url_regex:
+    match: 'host=[^&]*\.(bilivideo|bilibili|yirujs)\.com'
+    policy: DIRECT
+- domain:
+    match: httpdns.bilivideo.com
+    policy: DIRECT
 - domain_keyword:
     match: httpdns
     policy: REJECT
