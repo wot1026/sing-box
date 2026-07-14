@@ -22,7 +22,7 @@ work_dir="/etc/sing-box"
 conf_dir="${work_dir}/conf"
 client_dir="${work_dir}/url.txt"
 backup_dir="/etc/sing-box-backup"
-SCRIPT_URL="https://raw.githubusercontent.com/wot1026-cmd/sing-box/main/sing-box.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/wot1026/sing-box/main/sing-box.sh"
 ARGO_PORT="8001"
 
 SB_VERSION="1.13.13"
