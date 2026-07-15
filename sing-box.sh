@@ -1357,6 +1357,224 @@ EOF
     esac
 }
 
+# ── BBR 网络调优管理 ──────────────────────────────────
+BBR_CONF="/etc/sysctl.d/99-wot-proxy-tuning.conf"
+BBR_KEYWORDS='tcp_|rmem|wmem|conntrack|congestion_control|qdisc'
+
+bbr_get_status() {
+    local cc qdisc
+    cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    if [ -f "$BBR_CONF" ]; then
+        echo "本脚本调优: 已启用 (${cc} + ${qdisc})"
+    elif [ "$cc" = "bbr" ]; then
+        echo "本脚本调优: 未启用，但检测到其他来源已开启 BBR (${cc} + ${qdisc})"
+    else
+        echo "本脚本调优: 未启用 (当前: ${cc} + ${qdisc})"
+    fi
+}
+
+bbr_write_conf() {
+    # $1 = rmem/wmem 上限字节数, $2 = 场景描述文字
+    local buf="$1" desc="$2"
+    cat > "$BBR_CONF" << EOF
+# 由 sing-box.sh 网络调优模块生成
+# 场景: ${desc}
+# 生成时间: $(date)
+
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+net.core.rmem_max = ${buf}
+net.core.wmem_max = ${buf}
+net.ipv4.tcp_rmem = 4096 87380 ${buf}
+net.ipv4.tcp_wmem = 4096 65536 ${buf}
+
+net.core.netdev_max_backlog = 8192
+net.core.somaxconn = 4096
+net.ipv4.tcp_max_syn_backlog = 4096
+
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_dsack = 1
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_retries2 = 8
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_slow_start_after_idle = 0
+EOF
+    sysctl --system >/dev/null 2>&1
+    local cc qdisc rmem
+    cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    rmem=$(sysctl -n net.core.rmem_max 2>/dev/null)
+    if [ "$cc" = "bbr" ] && [ "$qdisc" = "fq" ]; then
+        green "\n已应用「${desc}」\n拥塞控制: ${cc}    队列: ${qdisc}    缓冲区上限: ${rmem}\n"
+    else
+        red "\n配置已写入，但验证异常 (拥塞控制=${cc}, 队列=${qdisc})，请检查是否有其他文件覆盖了此设置\n"
+    fi
+}
+
+bbr_apply_menu() {
+    clear; echo ""
+    green "=== 选择调优场景 ===\n"
+    green  "1. 日常场景      缓冲区 8MB  | 不追求跑满带宽，网页/聊天/一般视频够用"
+    green  "2. 大文件/下载   缓冲区 32MB | 追求单连接吞吐，适合美国等高延迟节点"
+    green  "3. 低延迟场景    缓冲区 4MB  | 韩国/日本等低延迟节点，游戏/实时性优先"
+    green  "4. 自定义带宽    输入 Mbps，按 BDP 公式现算"
+    purple "0. 返回上一级"
+    skyblue "————"
+    reading "\n请输入选择: " choice
+    case "$choice" in
+        1) bbr_write_conf 8388608 "日常场景 (8MB)" ;;
+        2) bbr_write_conf 33554432 "大文件/下载场景 (32MB)" ;;
+        3) bbr_write_conf 4194304 "低延迟场景 (4MB)" ;;
+        4)
+            reading "请输入带宽 (Mbps): " bw
+            if ! [[ "$bw" =~ ^[0-9]+$ ]] || [ "$bw" -eq 0 ]; then
+                red "输入无效，请输入正整数"
+                return
+            fi
+            reading "请输入预估RTT毫秒 (不清楚直接回车，默认150ms): " rtt
+            [ -z "$rtt" ] && rtt=150
+            local bw_bps bdp_bytes buf_bytes
+            bw_bps=$((bw * 1000000))
+            bdp_bytes=$((bw_bps * rtt / 1000 / 8))
+            buf_bytes=$((bdp_bytes * 2))
+            [ "$buf_bytes" -lt 4194304 ] && buf_bytes=4194304
+            [ "$buf_bytes" -gt 134217728 ] && buf_bytes=134217728
+            yellow "\nBDP ≈ $((bdp_bytes / 1024 / 1024))MB，取2倍余量 = $((buf_bytes / 1024 / 1024))MB 作为缓冲区上限\n"
+            bbr_write_conf "$buf_bytes" "自定义 (${bw}Mbps / ${rtt}ms RTT)"
+            ;;
+        0) return ;;
+        *) red "无效选项" ;;
+    esac
+}
+
+bbr_disable() {
+    if [ ! -f "$BBR_CONF" ]; then
+        yellow "\n未检测到本脚本生成的调优配置，无需关闭\n"
+        return
+    fi
+    reading "确定要关闭本脚本的调优配置吗? 将恢复系统默认值 (y/n): " confirm
+    if [[ "$confirm" == [yY] ]]; then
+        mv "$BBR_CONF" "${BBR_CONF}.bak.$(date +%Y%m%d%H%M%S)"
+        sysctl --system >/dev/null 2>&1
+        green "\n已关闭，配置已备份为 ${BBR_CONF}.bak.$(date +%Y%m%d%H%M%S)\n"
+    else
+        purple "已取消"
+    fi
+}
+
+bbr_scan() {
+    clear; echo ""
+    green "=== 扫描现有配置中的网络调优相关设置 ===\n"
+    yellow "(只读，不会做任何修改)\n"
+
+    local files
+    files=$(grep -rlE "$BBR_KEYWORDS" /etc/sysctl.d/ /etc/sysctl.conf /usr/lib/sysctl.d/ 2>/dev/null)
+    if [ -z "$files" ]; then
+        yellow "未发现相关配置文件。"
+        return
+    fi
+
+    local idx=0
+    declare -gA BBR_SCAN_FILES=()
+    for f in $files; do
+        idx=$((idx + 1))
+        BBR_SCAN_FILES[$idx]="$f"
+        if [ "$f" = "$BBR_CONF" ]; then
+            skyblue "[${idx}] ${f}  ← 本脚本生成的配置（用「关闭调优」处理，不在此清理）"
+        else
+            purple "[${idx}] ${f}"
+        fi
+        grep -nE "$BBR_KEYWORDS" "$f" 2>/dev/null | grep -v '^\s*#' | sed 's/^/      /'
+        echo ""
+    done
+
+    echo "===== 重复参数检测 ====="
+    local dups
+    dups=$(grep -rhE '^net\.|^kernel\.|^vm\.|^fs\.' /etc/sysctl.d/*.conf /etc/sysctl.conf 2>/dev/null \
+        | sed 's/=.*//' | sed 's/ *$//' | sort | uniq -d)
+    if [ -z "$dups" ]; then
+        green "未发现重复设置的参数。"
+    else
+        while read -r dup; do
+            [ -z "$dup" ] && continue
+            yellow "⚠ 参数 '${dup}' 在多个文件中重复设置，最终生效值以 sysctl --system 加载顺序中最后一次为准："
+            grep -rnE "^${dup}\s*=" /etc/sysctl.d/*.conf /etc/sysctl.conf 2>/dev/null | sed 's/^/      /'
+            echo ""
+        done <<< "$dups"
+    fi
+    green "\n扫描完成。如需清理，请使用菜单中的「清理冲突配置」选项。\n"
+}
+
+bbr_clean() {
+    bbr_scan
+    if [ -z "${BBR_SCAN_FILES[*]}" ]; then
+        return
+    fi
+
+    echo ""
+    yellow "重要提示：以上文件里可能混有 BBR 之外的其他配置（安全加固、IPv6、端口范围等），"
+    yellow "本功能不会整份删除文件，只会帮你注释掉扫描到的冲突网络参数那一行，其余内容保持不变。\n"
+
+    reading "请输入要处理的编号 (空格分隔，如 \"1 2\"，或输入 0 取消): " nums
+    [ -z "$nums" ] || [ "$nums" = "0" ] && { purple "已取消"; return; }
+
+    for n in $nums; do
+        local target="${BBR_SCAN_FILES[$n]}"
+        if [ -z "$target" ]; then
+            red "编号 ${n} 无效，跳过"
+            continue
+        fi
+        if [ "$target" = "$BBR_CONF" ]; then
+            yellow "编号 ${n} 是本脚本自己的配置，跳过（请用「关闭调优」处理）"
+            continue
+        fi
+        if [[ "$target" == *.bak ]]; then
+            yellow "${target} 是 .bak 文件，不会被 sysctl 加载，无实际影响，跳过"
+            continue
+        fi
+
+        local backup="${target}.bak.$(date +%Y%m%d%H%M%S)"
+        cp "$target" "$backup"
+        # 只注释掉涉及BBR/网络调优关键字的行（关键字可能出现在行中任意位置，如 net.core.rmem_max），
+        # 已经是注释的行跳过，其余内容原样保留
+        sed -i -E "/^[[:space:]]*#/! s/^(.*(${BBR_KEYWORDS}).*)$/# [由sing-box.sh注释] \1/" "$target"
+        green "已处理 ${target}（已备份至 ${backup}，仅注释相关行，未删除文件）"
+    done
+
+    sysctl --system >/dev/null 2>&1
+    echo ""
+    green "===== 处理后验证 ====="
+    sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc net.core.rmem_max 2>/dev/null
+    yellow "\n如发现异常，可用对应的 .bak.时间戳 文件手动恢复。\n"
+}
+
+bbr_tune_menu() {
+    clear; echo ""
+    purple "=== 网络调优 (BBR) 管理 ===\n"
+    bbr_get_status
+    echo ""
+    green  "1. 应用调优 (选择场景)"
+    green  "2. 关闭调优"
+    green  "3. 扫描冲突配置"
+    green  "4. 清理冲突配置"
+    purple "0. 返回主菜单"
+    skyblue "————"
+    reading "\n请输入选择: " choice
+    case "$choice" in
+        1) bbr_apply_menu ;;
+        2) bbr_disable ;;
+        3) bbr_scan ;;
+        4) bbr_clean ;;
+        0) return ;;
+        *) red "无效选项" ;;
+    esac
+}
+
 menu() {
     local sb_status argo_status
     sb_status=$(check_singbox 2>&1)
@@ -1381,6 +1599,7 @@ menu() {
     echo   "==============="
     purple "10. SSH 综合工具箱"
     purple "11. SSH 防护 (fail2ban)"
+    purple "12. 网络调优 (BBR)"
     echo   "==============="
     red    "0. 退出脚本"
     echo   "==========="
@@ -1728,7 +1947,7 @@ case "$1" in
     "")
         while true; do
             menu
-            reading "请输入选择(0-11): " choice
+            reading "请输入选择(0-12): " choice
             echo ""
             need_pause=true
             case "$choice" in
@@ -1754,8 +1973,9 @@ case "$1" in
                     need_pause=false
                     ;;
                 11) manage_fail2ban; need_pause=true ;;
+                12) bbr_tune_menu;   need_pause=true ;;
                 0) exit 0 ;;
-                *) red "无效选项，请输入 0-11" ;;
+                *) red "无效选项，请输入 0-12" ;;
             esac
             [ "$need_pause" = true ] && read -n1 -s -r -p $'\033[1;91m按任意键返回…\033[0m'
             echo ""
