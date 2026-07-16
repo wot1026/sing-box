@@ -1430,10 +1430,10 @@ EOF
     cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
     qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
     rmem=$(sysctl -n net.core.rmem_max 2>/dev/null)
-    if [ "$cc" = "bbr" ] && [ "$qdisc" = "fq" ]; then
+    if [ "$cc" = "bbr" ] && [ "$qdisc" = "fq" ] && [ "$rmem" = "$buf" ]; then
         green "\n已应用「${desc}」\n拥塞控制: ${cc}    队列: ${qdisc}    缓冲区上限: ${rmem}\n"
     else
-        red "\n配置已写入，但验证异常 (拥塞控制=${cc}, 队列=${qdisc})，请检查是否有其他文件覆盖了此设置\n"
+        red "\n配置已写入，但验证异常 (拥塞控制=${cc}, 队列=${qdisc}, 缓冲区=${rmem}，期望值=${buf})\n请检查是否有其他文件覆盖了此设置（可用「扫描冲突配置」查看）\n"
     fi
 }
 
@@ -1480,9 +1480,11 @@ bbr_disable() {
     fi
     reading "确定要关闭本脚本的调优配置吗? 将恢复系统默认值 (y/n): " confirm
     if [[ "$confirm" == [yY] ]]; then
-        mv "$BBR_CONF" "${BBR_CONF}.bak.$(date +%Y%m%d%H%M%S)"
+        local ts
+        ts=$(date +%Y%m%d%H%M%S)
+        mv "$BBR_CONF" "${BBR_CONF}.bak.${ts}"
         sysctl --system >/dev/null 2>&1
-        green "\n已关闭，配置已备份为 ${BBR_CONF}.bak.$(date +%Y%m%d%H%M%S)\n"
+        green "\n已关闭，配置已备份为 ${BBR_CONF}.bak.${ts}\n"
     else
         purple "已取消"
     fi
@@ -1516,7 +1518,7 @@ bbr_scan() {
 
     echo "===== 重复参数检测 ====="
     local dups
-    dups=$(grep -rhE '^net\.|^kernel\.|^vm\.|^fs\.' /etc/sysctl.d/*.conf /etc/sysctl.conf 2>/dev/null \
+    dups=$(grep -rhE '^net\.|^kernel\.|^vm\.|^fs\.' /etc/sysctl.d/*.conf /etc/sysctl.conf /usr/lib/sysctl.d/*.conf 2>/dev/null \
         | sed 's/=.*//' | sed 's/ *$//' | sort | uniq -d)
     if [ -z "$dups" ]; then
         green "未发现重复设置的参数。"
@@ -1524,7 +1526,7 @@ bbr_scan() {
         while read -r dup; do
             [ -z "$dup" ] && continue
             yellow "⚠ 参数 '${dup}' 在多个文件中重复设置，最终生效值以 sysctl --system 加载顺序中最后一次为准："
-            grep -rnE "^${dup}\s*=" /etc/sysctl.d/*.conf /etc/sysctl.conf 2>/dev/null | sed 's/^/      /'
+            grep -rnE "^${dup}\s*=" /etc/sysctl.d/*.conf /etc/sysctl.conf /usr/lib/sysctl.d/*.conf 2>/dev/null | sed 's/^/      /'
             echo ""
         done <<< "$dups"
     fi
