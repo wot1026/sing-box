@@ -1382,18 +1382,22 @@ bbr_write_conf() {
 # 场景: ${desc}
 # 生成时间: $(date)
 
+# ── 拥塞控制 ──
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 
+# ── 缓冲区 (随场景变化) ──
 net.core.rmem_max = ${buf}
 net.core.wmem_max = ${buf}
 net.ipv4.tcp_rmem = 4096 87380 ${buf}
 net.ipv4.tcp_wmem = 4096 65536 ${buf}
 
+# ── 连接队列 ──
 net.core.netdev_max_backlog = 8192
 net.core.somaxconn = 4096
 net.ipv4.tcp_max_syn_backlog = 4096
 
+# ── TCP 连接优化 ──
 net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_window_scaling = 1
 net.ipv4.tcp_sack = 1
@@ -1401,8 +1405,25 @@ net.ipv4.tcp_dsack = 1
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_retries2 = 8
+net.ipv4.tcp_syn_retries = 3
+net.ipv4.tcp_synack_retries = 3
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_slow_start_after_idle = 0
+
+# ── 以下为固定参数，与硬件规格/场景无关，任何机器统一使用 ──
+net.ipv4.tcp_autocorking = 0
+net.ipv4.tcp_notsent_lowat = 16384
+net.ipv4.tcp_no_metrics_save = 0
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
+net.ipv4.tcp_orphan_retries = 3
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_rfc1337 = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_max_tw_buckets = 6000
+net.ipv4.udp_rmem_min = 8192
+net.ipv4.udp_wmem_min = 8192
 EOF
     sysctl --system >/dev/null 2>&1
     local cc qdisc rmem
@@ -1553,6 +1574,88 @@ bbr_clean() {
     yellow "\n如发现异常，可用对应的 .bak.时间戳 文件手动恢复。\n"
 }
 
+# ── DNS 管理 ──────────────────────────────────
+dns_get_mode() {
+    local target
+    target=$(readlink -f /etc/resolv.conf 2>/dev/null)
+    if [[ "$target" == *"systemd/resolve"* ]]; then
+        echo "systemd-resolved"
+    else
+        echo "static"
+    fi
+}
+
+dns_get_status() {
+    local mode="$1"
+    if [ "$mode" = "systemd-resolved" ]; then
+        resolvectl status 2>/dev/null | grep -A2 "Current DNS Server\|DNS Servers" | head -6
+    else
+        grep "^nameserver" /etc/resolv.conf 2>/dev/null
+    fi
+}
+
+dns_apply() {
+    # $1 = 主DNS, $2 = 备用DNS
+    local dns1="$1" dns2="$2"
+    local mode
+    mode=$(dns_get_mode)
+
+    if [ "$mode" = "systemd-resolved" ]; then
+        [ -f /etc/systemd/resolved.conf ] && cp /etc/systemd/resolved.conf "/etc/systemd/resolved.conf.bak.$(date +%Y%m%d%H%M%S)"
+        if grep -q "^DNS=" /etc/systemd/resolved.conf 2>/dev/null; then
+            sed -i "s/^DNS=.*/DNS=${dns1} ${dns2}/" /etc/systemd/resolved.conf
+        elif grep -q "^#DNS=" /etc/systemd/resolved.conf 2>/dev/null; then
+            sed -i "s/^#DNS=.*/DNS=${dns1} ${dns2}/" /etc/systemd/resolved.conf
+        else
+            echo "DNS=${dns1} ${dns2}" >> /etc/systemd/resolved.conf
+        fi
+        systemctl restart systemd-resolved
+        green "\n已通过 systemd-resolved 设置 DNS: ${dns1} ${dns2}\n"
+    else
+        [ -f /etc/resolv.conf ] && cp /etc/resolv.conf "/etc/resolv.conf.bak.$(date +%Y%m%d%H%M%S)"
+        cat > /etc/resolv.conf << EOF
+nameserver ${dns1}
+nameserver ${dns2}
+EOF
+        green "\n已直接写入 /etc/resolv.conf，DNS: ${dns1} ${dns2}\n"
+    fi
+    echo ""
+    yellow "当前生效DNS："
+    dns_get_status "$mode"
+}
+
+dns_menu() {
+    clear; echo ""
+    purple "=== DNS 管理 ===\n"
+    local mode
+    mode=$(dns_get_mode)
+    green "当前模式: ${mode}"
+    yellow "当前DNS配置："
+    dns_get_status "$mode"
+    echo ""
+    green  "1. 设为 Google DNS (8.8.8.8 / 8.8.4.4)"
+    green  "2. 设为 Cloudflare DNS (1.1.1.1 / 1.0.0.1)"
+    green  "3. 自定义 DNS"
+    purple "0. 返回主菜单"
+    skyblue "————"
+    reading "\n请输入选择: " choice
+    case "$choice" in
+        1) dns_apply "8.8.8.8" "8.8.4.4" ;;
+        2) dns_apply "1.1.1.1" "1.0.0.1" ;;
+        3)
+            reading "请输入主DNS: " d1
+            reading "请输入备用DNS: " d2
+            if [[ ! "$d1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ ! "$d2" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                red "IP格式不正确"
+                return
+            fi
+            dns_apply "$d1" "$d2"
+            ;;
+        0) return ;;
+        *) red "无效选项" ;;
+    esac
+}
+
 bbr_tune_menu() {
     clear; echo ""
     purple "=== 网络调优 (BBR) 管理 ===\n"
@@ -1600,6 +1703,7 @@ menu() {
     purple "10. SSH 综合工具箱"
     purple "11. SSH 防护 (fail2ban)"
     purple "12. 网络调优 (BBR)"
+    purple "13. DNS 管理"
     echo   "==============="
     red    "0. 退出脚本"
     echo   "==========="
@@ -1947,7 +2051,7 @@ case "$1" in
     "")
         while true; do
             menu
-            reading "请输入选择(0-12): " choice
+            reading "请输入选择(0-13): " choice
             echo ""
             need_pause=true
             case "$choice" in
@@ -1974,8 +2078,9 @@ case "$1" in
                     ;;
                 11) manage_fail2ban; need_pause=true ;;
                 12) bbr_tune_menu;   need_pause=true ;;
+                13) dns_menu;        need_pause=true ;;
                 0) exit 0 ;;
-                *) red "无效选项，请输入 0-12" ;;
+                *) red "无效选项，请输入 0-13" ;;
             esac
             [ "$need_pause" = true ] && read -n1 -s -r -p $'\033[1;91m按任意键返回…\033[0m'
             echo ""
