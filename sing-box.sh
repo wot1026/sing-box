@@ -1374,9 +1374,33 @@ bbr_get_status() {
     fi
 }
 
+# 按机器物理内存返回 rmem/wmem 缓冲区上限的安全封顶值（字节）。
+# 用于给 BDP 公式算出的值兜底，避免小内存机器被算出的大缓冲值占满内存。
+bbr_mem_buffer_cap() {
+    local mem_kb mem_mb
+    mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)
+    mem_mb=$(( ${mem_kb:-1048576} / 1024 ))
+    if [ "$mem_mb" -lt 512 ]; then
+        echo $((8 * 1024 * 1024))
+    elif [ "$mem_mb" -lt 1024 ]; then
+        echo $((16 * 1024 * 1024))
+    elif [ "$mem_mb" -lt 2048 ]; then
+        echo $((32 * 1024 * 1024))
+    elif [ "$mem_mb" -lt 4096 ]; then
+        echo $((64 * 1024 * 1024))
+    else
+        echo $((128 * 1024 * 1024))
+    fi
+}
+
 bbr_write_conf() {
-    # $1 = rmem/wmem 上限字节数, $2 = 场景描述文字
-    local buf="$1" desc="$2"
+    # $1 = rmem/wmem 上限字节数, $2 = 场景描述文字, $3 = RTT毫秒（可选，用于 notsent_lowat 分档，默认150）
+    local buf="$1" desc="$2" rtt="${3:-150}" notsent_lowat
+    if [ "$rtt" -ge 120 ]; then
+        notsent_lowat=16384
+    else
+        notsent_lowat=32768
+    fi
     cat > "$BBR_CONF" << EOF
 # 由 sing-box.sh 网络调优模块生成
 # 场景: ${desc}
@@ -1410,9 +1434,11 @@ net.ipv4.tcp_synack_retries = 3
 net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_slow_start_after_idle = 0
 
+# ── 以下参数按 RTT 分档（≥120ms 用 16384，否则 32768） ──
+net.ipv4.tcp_notsent_lowat = ${notsent_lowat}
+
 # ── 以下为固定参数，与硬件规格/场景无关，任何机器统一使用 ──
 net.ipv4.tcp_autocorking = 0
-net.ipv4.tcp_notsent_lowat = 16384
 net.ipv4.tcp_no_metrics_save = 0
 net.ipv4.tcp_keepalive_time = 300
 net.ipv4.tcp_keepalive_intvl = 30
@@ -1431,7 +1457,7 @@ EOF
     qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
     rmem=$(sysctl -n net.core.rmem_max 2>/dev/null)
     if [ "$cc" = "bbr" ] && [ "$qdisc" = "fq" ] && [ "$rmem" = "$buf" ]; then
-        green "\n已应用「${desc}」\n拥塞控制: ${cc}    队列: ${qdisc}    缓冲区上限: ${rmem}\n"
+        green "\n已应用「${desc}」\n拥塞控制: ${cc}    队列: ${qdisc}    缓冲区上限: ${rmem}    notsent_lowat: ${notsent_lowat}\n"
     else
         red "\n配置已写入，但验证异常 (拥塞控制=${cc}, 队列=${qdisc}, 缓冲区=${rmem}，期望值=${buf})\n请检查是否有其他文件覆盖了此设置（可用「扫描冲突配置」查看）\n"
     fi
@@ -1448,9 +1474,9 @@ bbr_apply_menu() {
     skyblue "————"
     reading "\n请输入选择: " choice
     case "$choice" in
-        1) bbr_write_conf 8388608 "日常场景 (8MB)" ;;
-        2) bbr_write_conf 33554432 "大文件/下载场景 (32MB)" ;;
-        3) bbr_write_conf 4194304 "低延迟场景 (4MB)" ;;
+        1) bbr_write_conf 8388608 "日常场景 (8MB)" 150 ;;
+        2) bbr_write_conf 33554432 "大文件/下载场景 (32MB)" 200 ;;
+        3) bbr_write_conf 4194304 "低延迟场景 (4MB)" 50 ;;
         4)
             reading "请输入带宽 (Mbps): " bw
             if ! [[ "$bw" =~ ^[0-9]+$ ]] || [ "$bw" -eq 0 ]; then
@@ -1459,14 +1485,25 @@ bbr_apply_menu() {
             fi
             reading "请输入预估RTT毫秒 (不清楚直接回车，默认150ms): " rtt
             [ -z "$rtt" ] && rtt=150
-            local bw_bps bdp_bytes buf_bytes
+            if ! [[ "$rtt" =~ ^[0-9]+$ ]] || [ "$rtt" -eq 0 ]; then
+                red "RTT 输入无效，请输入正整数"
+                return
+            fi
+            local bw_bps bdp_bytes buf_bytes mem_cap
             bw_bps=$((bw * 1000000))
             bdp_bytes=$((bw_bps * rtt / 1000 / 8))
             buf_bytes=$((bdp_bytes * 2))
             [ "$buf_bytes" -lt 4194304 ] && buf_bytes=4194304
+            # 先按硬性上限 128MB 截断，再用机器内存做安全封顶（小内存机器封顶更低，
+            # 防止 BDP 公式在小内存实例上算出过大的值而挤占可用内存）。
             [ "$buf_bytes" -gt 134217728 ] && buf_bytes=134217728
-            yellow "\nBDP ≈ $((bdp_bytes / 1024 / 1024))MB，取2倍余量 = $((buf_bytes / 1024 / 1024))MB 作为缓冲区上限\n"
-            bbr_write_conf "$buf_bytes" "自定义 (${bw}Mbps / ${rtt}ms RTT)"
+            mem_cap=$(bbr_mem_buffer_cap)
+            if [ "$buf_bytes" -gt "$mem_cap" ]; then
+                yellow "\n按 BDP 公式算出的缓冲区超过本机内存安全上限，已从 $((buf_bytes / 1024 / 1024))MB 封顶至 $((mem_cap / 1024 / 1024))MB\n"
+                buf_bytes="$mem_cap"
+            fi
+            yellow "\nBDP ≈ $((bdp_bytes / 1024 / 1024))MB，取2倍余量，最终缓冲区上限 = $((buf_bytes / 1024 / 1024))MB\n"
+            bbr_write_conf "$buf_bytes" "自定义 (${bw}Mbps / ${rtt}ms RTT)" "$rtt"
             ;;
         0) return ;;
         *) red "无效选项" ;;
@@ -1575,7 +1612,6 @@ bbr_clean() {
     sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc net.core.rmem_max 2>/dev/null
     yellow "\n如发现异常，可用对应的 .bak.时间戳 文件手动恢复。\n"
 }
-
 # ── DNS 管理 ──────────────────────────────────
 dns_get_mode() {
     local target
