@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-09-20 03:00:03
+# 更新时间: 2026-09-21 03:00:03
 # 插件: BlockAdvertisers
 # 模式: filter
 
@@ -991,6 +991,9 @@ rules:
     policy: REJECT
 - domain:
     match: zxid-m.mobileservice.cn
+    policy: REJECT
+- domain:
+    match: xadsmartget.adgain.cn
     policy: REJECT
 - domain_suffix:
     match: tradplusad.com
