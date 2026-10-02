@@ -1,5 +1,5 @@
 #!# 自动同步自 kelee.one (https://kelee.one/Tool/Loon/Lpx/Block_HTTPDNS.lpx)
-#!# 更新时间: 2026-10-01 03:00:03
+#!# 更新时间: 2026-10-02 03:00:03
 #!# 已前置插入拼多多/微信/字节系/B站(yirujs)HTTPDNS放行例外规则，并删除对应原始REJECT域名行(配套IP-CIDR规则保留)，已剔除拼多多/amdc等指定规则，格式保持Loon原生语法不变
 
 #!name=HTTPDNS拦截器(自用-排除拼多多)
@@ -171,12 +171,12 @@ URL-REGEX, "^http:\/\/\[[0-9a-fA-F:]+\]:\d+\/httpdns\/", REJECT
 DOMAIN, httpdns.zybang.com, REJECT
 
 [Rewrite]
-^https?:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$ reject-dict
-^https?:\/\/cdn\.wup\.huya\.com\/monitor\/monitor\.jsp reject
-^https:\/\/msglb\.91160\.com\/msg\/outer\/broker\/get$ reject-dict
-^https:\/\/gslbali\.ximalaya\.com\/linkeye-cloud\/httpdns\/ reject
-^https:\/\/ucdc\d?-upaas\.uc\.cn\/api\/v\d\/dns_query\? reject-dict
-^https:\/\/gw-cn\.jiaoliuqu\.com\/taqu-im-broadcast-srv\/v\d\/Comet\/get\? reject-dict
+request if ${url} ~= /^https?:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$/i then reject_dict(200)
+request if ${url} ~= /^https?:\/\/cdn\.wup\.huya\.com\/monitor\/monitor\.jsp/i then reject(404)
+request if ${url} ~= /^https:\/\/msglb\.91160\.com\/msg\/outer\/broker\/get$/i then reject_dict(200)
+request if ${url} ~= /^https:\/\/gslbali\.ximalaya\.com\/linkeye-cloud\/httpdns\//i then reject(404)
+request if ${url} ~= /^https:\/\/ucdc\d?-upaas\.uc\.cn\/api\/v\d\/dns_query\?/i then reject_dict(200)
+request if ${url} ~= /^https:\/\/gw-cn\.jiaoliuqu\.com\/taqu-im-broadcast-srv\/v\d\/Comet\/get\?/i then reject_dict(200)
 
 [MitM]
 hostname=appconf.mail.163.com, msglb.91160.com, ucdc2-upaas.uc.cn, gw-cn.jiaoliuqu.com

@@ -1,5 +1,5 @@
 # 自动同步自 kelee.one
-# 更新时间: 2026-10-01 03:00:03
+# 更新时间: 2026-10-02 03:00:03
 # 插件: Block_HTTPDNS
 # 模式: exception
 
@@ -570,24 +570,24 @@ rules:
     match: httpdns.zybang.com
     policy: REJECT
 url_rewrites:
-- match: ^https?://appconf\.mail\.163\.com/mailmaster/api/http/urlConfig\.do$
-  location: http://reject-dict/
-  status_code: 200
-- match: ^https?://cdn\.wup\.huya\.com/monitor/monitor\.jsp
-  location: http://reject/
+- match: request
+  location: if ${url} ~= /^https?:\/\/appconf\.mail\.163\.com\/mailmaster\/api\/http\/urlConfig\.do$/i then reject_dict(200)
   status_code: 307
-- match: ^https://msglb\.91160\.com/msg/outer/broker/get$
-  location: http://reject-dict/
-  status_code: 200
-- match: ^https://gslbali\.ximalaya\.com/linkeye-cloud/httpdns/
-  location: http://reject/
+- match: request
+  location: if ${url} ~= /^https?:\/\/cdn\.wup\.huya\.com\/monitor\/monitor\.jsp/i then reject(404)
   status_code: 307
-- match: ^https://ucdc\d?-upaas\.uc\.cn/api/v\d/dns_query\?
-  location: http://reject-dict/
-  status_code: 200
-- match: ^https://gw-cn\.jiaoliuqu\.com/taqu-im-broadcast-srv/v\d/Comet/get\?
-  location: http://reject-dict/
-  status_code: 200
+- match: request
+  location: if ${url} ~= /^https:\/\/msglb\.91160\.com\/msg\/outer\/broker\/get$/i then reject_dict(200)
+  status_code: 307
+- match: request
+  location: if ${url} ~= /^https:\/\/gslbali\.ximalaya\.com\/linkeye-cloud\/httpdns\//i then reject(404)
+  status_code: 307
+- match: request
+  location: if ${url} ~= /^https:\/\/ucdc\d?-upaas\.uc\.cn\/api\/v\d\/dns_query\?/i then reject_dict(200)
+  status_code: 307
+- match: request
+  location: if ${url} ~= /^https:\/\/gw-cn\.jiaoliuqu\.com\/taqu-im-broadcast-srv\/v\d\/Comet\/get\?/i then reject_dict(200)
+  status_code: 307
 mitm:
   hostnames:
     includes:
