@@ -10,5 +10,27 @@ domain_suffix_set:
   - mvconf.f.360.cn
   - ampaeservices.com
   - yahoo.com
+  # 红果短剧（字节系 CDN / 接口）
+  - douyinvod.com
+  - snssdk.com
+  - byteimg.com
+  - pstatp.com
+  - ixigua.com
+  - bytedance.com
+  - zijieapi.com
+  - douyincdn.com
+  - bytecdn.cn
+  - fqnovelpic.com
+  - qznovelvod.com
+  - vegslb.com
+  - bdcgslb.com
+  # 国内影视站
+  - 555yy2.com
+  - jisuzyv.com
+  - d62621.vip
+  - wu5mv.com
+  - baofeng10.com
+  - fengbao9.com
+  - ffzy-plays.com
 domain_keyword_set:
   - apple-relay
