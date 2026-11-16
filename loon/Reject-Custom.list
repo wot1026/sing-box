@@ -5,5 +5,8 @@ DOMAIN,connect.facebook.net
 DOMAIN,ep2.facebook.com
 DOMAIN,daq.zefrdata.com
 DOMAIN,vast.zefrdata.com
+DOMAIN,api.adguard.org
 DOMAIN,tiktok.tps.dv.tech
 DOMAIN-SUFFIX,dv.tech
+DOMAIN-SUFFIX,nektony.com
+DOMAIN-SUFFIX,app-cleaner.com
