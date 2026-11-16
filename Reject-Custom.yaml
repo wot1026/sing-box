@@ -18,9 +18,16 @@ domain_set:
   - daq.zefrdata.com
   - vast.zefrdata.com
 
+  # Adguard 上报接口（精确匹配）
+  - api.adguard.org
+
   # DoubleVerify 广告验证/遥测（TikTok 等App使用）
   - tiktok.tps.dv.tech
 
 domain_suffix_set:
   # DoubleVerify 主域名，覆盖其所有子域名
   - dv.tech
+
+  # App Cleaner / Nektony 联网（更新检查、遥测）
+  - nektony.com
+  - app-cleaner.com
