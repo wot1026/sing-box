@@ -2705,15 +2705,20 @@ EOF
 }
 
 # ── 切换 cloudflared 回源协议 ─────────────────────
+# 直接修改现有 argo.service 的 --protocol 参数，不重建 unit、不读取 Token 文件，
+# 所以即使 argo_token 文件缺失（Token 只存在于 unit 里）也能正常切换。
 set_argo_protocol() {
     is_fixed_tunnel_configured || { yellow "尚未配置固定隧道，请先选择 4 配置"; return 0; }
-    local cur new choice
-    cur=$(get_argo_proto)
+    local unit="/etc/systemd/system/argo.service"
+    local cur new choice unit_bak
+    # 当前协议以 unit 里实际生效的为准，读不到再回落到记录文件
+    cur=$(grep -E '^ExecStart=' "$unit" 2>/dev/null | grep -oE -- '--protocol [A-Za-z0-9]+' | head -1 | awk '{print $2}')
+    [ -z "$cur" ] && cur=$(get_argo_proto)
     clear; echo ""
     green "=== Argo 回源协议（cloudflared → Cloudflare 边缘）===\n"
     yellow "当前：${cur}\n"
     green  "1. http2  (TCP，默认)"
-    green  "2. quic   (UDP，需放行出站 UDP 7844)"
+    green  "2. quic   (UDP，需出站 UDP 7844 可通)"
     green  "3. auto   (由 cloudflared 自动选择并回退)"
     purple "0. 返回"
     reading "\n请输入选择: " choice
@@ -2725,23 +2730,50 @@ set_argo_protocol() {
     esac
     [ "$new" = "$cur" ] && { yellow "协议未变化"; return 0; }
 
-    echo "$new" > "$argo_proto_file"
-    chmod 600 "$argo_proto_file"
-    # 重建 unit（Token / JSON 两种模式都走同一个函数，内部读取 get_argo_proto）
-    if ! _rebuild_argo_service_from_tunnel_yml; then
-        echo "$cur" > "$argo_proto_file"
-        red "重建 argo 服务失败，已保留原协议 ${cur}"
+    # unit 还是占位的 /bin/true（隧道凭据未就绪）：只记录偏好，下次配置固定隧道时生效
+    if ! grep -q '^ExecStart=/etc/sing-box/argo tunnel' "$unit" 2>/dev/null; then
+        echo "$new" > "$argo_proto_file"
+        chmod 600 "$argo_proto_file"
+        yellow "argo 服务尚未生成有效配置，已记录协议 ${new}，将在下次「配置固定隧道」时生效"
+        return 0
+    fi
+
+    # unit 里可能含 Token，备份文件由 mktemp 创建（权限 600），所有分支都要清理
+    unit_bak=$(mktemp) && cp "$unit" "$unit_bak" || { rm -f "$unit_bak"; red "备份 argo.service 失败，已取消"; return 1; }
+    if grep -E '^ExecStart=' "$unit" | grep -q -- '--protocol '; then
+        sed -i -E "/^ExecStart=/s/--protocol [A-Za-z0-9]+/--protocol ${new}/" "$unit"
+    else
+        sed -i -E "/^ExecStart=/s|(argo tunnel)|\\1 --protocol ${new}|" "$unit"
+    fi
+    if ! grep -E '^ExecStart=' "$unit" | grep -q -- "--protocol ${new}"; then
+        cp "$unit_bak" "$unit"; rm -f "$unit_bak"
+        red "修改 argo.service 失败，已恢复原配置"
         return 1
     fi
+
+    echo "$new" > "$argo_proto_file"
+    chmod 600 "$argo_proto_file"
     # JSON 模式的 tunnel.yml 里也有 protocol 行，保持一致（命令行参数优先，这里只是避免两处不一致）
     sed -i "s/^protocol:.*/protocol: ${new}/" "${work_dir}/tunnel.yml" 2>/dev/null
     systemctl daemon-reload
     if restart_argo; then
+        rm -f "$unit_bak"
         green "已切换到 ${new}，请测试节点；若不通可切回 http2"
-    else
-        red "argo 重启失败，请检查：journalctl -u argo -n 50 --no-pager"
-        return 1
+        return 0
     fi
+
+    # 重启失败：回滚 unit / 记录文件 / yml，再拉起一次
+    yellow "argo 重启失败，正在回滚到 ${cur}…"
+    cp "$unit_bak" "$unit"; rm -f "$unit_bak"
+    echo "$cur" > "$argo_proto_file"
+    sed -i "s/^protocol:.*/protocol: ${cur}/" "${work_dir}/tunnel.yml" 2>/dev/null
+    systemctl daemon-reload
+    if restart_argo; then
+        red "已回滚到 ${cur}，请检查：journalctl -u argo -n 50 --no-pager"
+    else
+        red "回滚后 argo 仍未能启动，请检查：journalctl -u argo -n 50 --no-pager"
+    fi
+    return 1
 }
 
 # ── Argo 管理菜单 ─────────────────────────────────
