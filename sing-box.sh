@@ -3,7 +3,7 @@
 # 自用 sing-box 安装脚本
 # 协议: vless-argo(固定隧道) + hysteria2
 # 平台: Ubuntu / Debian (systemd)
-# 最后更新时间: 2026.8.21
+# 最后更新时间: 2026.11.23
 # =========================
 
 export LANG=en_US.UTF-8
@@ -22,6 +22,7 @@ work_dir="/etc/sing-box"
 conf_dir="${work_dir}/conf"
 client_dir="${work_dir}/url.txt"
 backup_dir="/etc/sing-box-backup"
+argo_proto_file="${work_dir}/argo_proto"   # cloudflared 回源协议：http2 / quic / auto
 SCRIPT_URL="https://raw.githubusercontent.com/wot1026/sing-box/main/sing-box.sh"
 ARGO_PORT="8001"
 
@@ -633,6 +634,7 @@ EOF
             cp "${backup_dir}/cf.env" "${work_dir}/cf.env"
             chmod 600 "${work_dir}/cf.env"
         fi
+        [ -f "${backup_dir}/argo_proto" ] && cp "${backup_dir}/argo_proto" "${argo_proto_file}"
         # 恢复 autofix 日志，使其在将来"彻底卸载"时仍能定位到被自动
         # 注释过的系统配置行并恢复；否则这条恢复链路会在这次重装后失效。
         [ -f "${backup_dir}/bbr-autofix.log" ]  && cp "${backup_dir}/bbr-autofix.log"  "$BBR_AUTOFIX_LOG"
@@ -794,7 +796,7 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${argo_token}
+ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol $(get_argo_proto) run --token ${argo_token}
 Restart=on-failure
 RestartSec=5s
 
@@ -816,7 +818,7 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --config ${work_dir}/tunnel.yml run
+ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --protocol $(get_argo_proto) --config ${work_dir}/tunnel.yml run
 Restart=on-failure
 RestartSec=5s
 
@@ -887,6 +889,16 @@ get_fixed_domain() {
 }
 
 is_fixed_tunnel_configured() { [ -f "${work_dir}/tunnel.yml" ]; }
+
+# cloudflared → CF 边缘的传输协议。文件缺失或内容非法时回落到 http2（即原有行为）
+get_argo_proto() {
+    local p
+    p=$(cat "$argo_proto_file" 2>/dev/null)
+    case "$p" in
+        quic|http2|auto) echo "$p" ;;
+        *) echo "http2" ;;
+    esac
+}
 
 # ── 节点信息生成 ──────────────────────────────────
 get_info() {
@@ -2623,7 +2635,7 @@ configure_fixed_tunnel() {
         cat > "${work_dir}/tunnel.yml" << EOF
 tunnel: ${tunnel_id}
 credentials-file: ${work_dir}/tunnel.json
-protocol: http2
+protocol: $(get_argo_proto)
 
 ingress:
   - hostname: ${argo_domain}
@@ -2642,7 +2654,7 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --config ${work_dir}/tunnel.yml run
+ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --protocol $(get_argo_proto) --config ${work_dir}/tunnel.yml run
 Restart=on-failure
 RestartSec=5s
 
@@ -2665,7 +2677,7 @@ After=network.target
 Type=simple
 NoNewPrivileges=yes
 TimeoutStartSec=0
-ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${argo_auth}
+ExecStart=/etc/sing-box/argo tunnel --edge-ip-version auto --no-autoupdate --protocol $(get_argo_proto) run --token ${argo_auth}
 Restart=on-failure
 RestartSec=5s
 
@@ -2692,6 +2704,46 @@ EOF
     fi
 }
 
+# ── 切换 cloudflared 回源协议 ─────────────────────
+set_argo_protocol() {
+    is_fixed_tunnel_configured || { yellow "尚未配置固定隧道，请先选择 4 配置"; return 0; }
+    local cur new choice
+    cur=$(get_argo_proto)
+    clear; echo ""
+    green "=== Argo 回源协议（cloudflared → Cloudflare 边缘）===\n"
+    yellow "当前：${cur}\n"
+    green  "1. http2  (TCP，默认)"
+    green  "2. quic   (UDP，需放行出站 UDP 7844)"
+    green  "3. auto   (由 cloudflared 自动选择并回退)"
+    purple "0. 返回"
+    reading "\n请输入选择: " choice
+    case "$choice" in
+        1) new="http2" ;;
+        2) new="quic" ;;
+        3) new="auto" ;;
+        *) return 0 ;;
+    esac
+    [ "$new" = "$cur" ] && { yellow "协议未变化"; return 0; }
+
+    echo "$new" > "$argo_proto_file"
+    chmod 600 "$argo_proto_file"
+    # 重建 unit（Token / JSON 两种模式都走同一个函数，内部读取 get_argo_proto）
+    if ! _rebuild_argo_service_from_tunnel_yml; then
+        echo "$cur" > "$argo_proto_file"
+        red "重建 argo 服务失败，已保留原协议 ${cur}"
+        return 1
+    fi
+    # JSON 模式的 tunnel.yml 里也有 protocol 行，保持一致（命令行参数优先，这里只是避免两处不一致）
+    sed -i "s/^protocol:.*/protocol: ${new}/" "${work_dir}/tunnel.yml" 2>/dev/null
+    systemctl daemon-reload
+    if restart_argo; then
+        green "已切换到 ${new}，请测试节点；若不通可切回 http2"
+    else
+        red "argo 重启失败，请检查：journalctl -u argo -n 50 --no-pager"
+        return 1
+    fi
+}
+
 # ── Argo 管理菜单 ─────────────────────────────────
 manage_argo() {
     local argo_status
@@ -2703,6 +2755,7 @@ manage_argo() {
     green  "2. 停止 Argo"
     green  "3. 重启 Argo"
     green  "4. 配置固定隧道"
+    green  "5. 切换回源协议 (当前: $(get_argo_proto))"
     purple "0. 返回主菜单"
     skyblue "————"
     reading "\n请输入选择: " choice
@@ -2713,6 +2766,7 @@ manage_argo() {
         3) is_fixed_tunnel_configured || { yellow "尚未配置固定隧道，请先选择 4 配置"; return 0; }
            restart_argo; return 0 ;;
         4) configure_fixed_tunnel; return 0 ;;
+        5) set_argo_protocol; return 0 ;;
         0) return 1 ;;
         *) red "无效选项！"; return 0 ;;
     esac
@@ -2764,6 +2818,7 @@ _do_uninstall_core() {
         [ -f "${work_dir}/tunnel.json" ]     && cp "${work_dir}/tunnel.json"     "${backup_dir}/tunnel.json"
         [ -f "${work_dir}/cf.env" ]          && cp "${work_dir}/cf.env"          "${backup_dir}/cf.env"
         [ -f "${work_dir}/argo_token" ]      && cp "${work_dir}/argo_token"      "${backup_dir}/argo_token"
+        [ -f "${work_dir}/argo_proto" ]      && cp "${work_dir}/argo_proto"      "${backup_dir}/argo_proto"
         [ -f "${work_dir}/protocols.list" ]  && cp "${work_dir}/protocols.list"  "${backup_dir}/protocols.list"
         [ -f "${work_dir}/protocols_acme.list" ] && cp "${work_dir}/protocols_acme.list" "${backup_dir}/protocols_acme.list"
         [ -d "${work_dir}/acme" ]      && cp -r "${work_dir}/acme"      "${backup_dir}/acme"
